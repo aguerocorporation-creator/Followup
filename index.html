@@ -78,6 +78,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .outcome-btn{font-size:11px;padding:4px 8px;border-radius:var(--radius-sm);border:1px solid var(--border2);background:var(--bg3);color:var(--text2);cursor:pointer;transition:all .15s;font-weight:500}
 .outcome-btn:hover{background:var(--bg4);color:var(--text)}
 .outcome-btn.answered:hover{background:#22c55e20;border-color:#22c55e60;color:var(--green)}
+.outcome-btn.sent:hover{background:#22c55e20;border-color:#22c55e60;color:var(--green)}
 .outcome-btn.noanswer:hover{background:#f9731620;border-color:#f9731660;color:var(--warm)}
 .outcome-btn.notint:hover{background:#ff4d6d20;border-color:#ff4d6d60;color:var(--hot)}
 .outcome-btn:disabled{opacity:.4;cursor:not-allowed}
@@ -202,6 +203,50 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .cal-badge.synced{background:var(--green-bg);color:var(--green)}
 .cal-badge.failed{background:var(--hot-bg);color:var(--hot)}
 .cal-badge.pending{background:var(--yellow-bg);color:var(--yellow)}
+
+/* ── SEQUENCE UI ─────────────────────────────── */
+.seq-container{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:12px;overflow:hidden}
+.seq-container.hot{border-left:3px solid var(--hot)}
+.seq-container.warm{border-left:3px solid var(--warm)}
+.seq-container.cold{border-left:3px solid var(--cold)}
+.seq-container.overdue-lead{border-color:#eab30860}
+.seq-header{padding:12px 16px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--border);cursor:pointer}
+.seq-header:hover{background:var(--bg3)}
+.seq-lead-info{flex:1}
+.seq-lead-name{font-size:14px;font-weight:600;color:var(--text)}
+.seq-meta{font-size:11px;color:var(--text3);margin-top:2px;display:flex;gap:10px;flex-wrap:wrap}
+.seq-progress-bar{height:3px;background:var(--border);border-radius:99px;overflow:hidden;margin-top:6px;width:120px}
+.seq-progress-fill{height:100%;border-radius:99px;transition:width .3s}
+.seq-progress-fill.hot{background:var(--hot)}
+.seq-progress-fill.warm{background:var(--warm)}
+.seq-progress-fill.cold{background:var(--cold)}
+.seq-steps{display:flex;gap:0;overflow-x:auto;padding:12px 16px;scrollbar-width:none}
+.seq-steps::-webkit-scrollbar{display:none}
+.seq-step{display:flex;flex-direction:column;align-items:center;min-width:100px;position:relative}
+.seq-step:not(:last-child)::after{content:'';position:absolute;right:-1px;top:14px;width:calc(100% - 24px);height:2px;background:var(--border);left:50%;z-index:0}
+.seq-step.done:not(:last-child)::after{background:var(--green)}
+.seq-dot{width:28px;height:28px;border-radius:50%;border:2px solid var(--border2);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;background:var(--bg2);z-index:1;flex-shrink:0}
+.seq-dot.done{background:var(--green-bg);border-color:var(--green);color:var(--green)}
+.seq-dot.active{background:var(--hot-bg);border-color:var(--hot);color:var(--hot)}
+.seq-dot.overdue{background:var(--yellow-bg);border-color:var(--yellow);color:var(--yellow)}
+.seq-dot.pending{color:var(--text3)}
+.seq-step-label{font-size:10px;color:var(--text3);margin-top:5px;text-align:center;line-height:1.3;max-width:90px}
+.seq-step-label.active{color:var(--text);font-weight:600}
+.seq-step-label.done{color:var(--green)}
+.seq-step-actions{padding:10px 16px;border-top:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap;align-items:center;background:var(--bg3)}
+.seq-step-info{font-size:12px;color:var(--text2);flex:1}
+.seq-last-next{padding:8px 16px;display:flex;gap:16px;font-size:11px;background:var(--bg3);border-top:1px solid var(--border)}
+.seq-last-next span{color:var(--text3)}
+.seq-last-next strong{color:var(--text2)}
+.step-label-badge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:99px;letter-spacing:.3px;flex-shrink:0}
+.step-label-badge.hot{background:var(--hot-bg);color:var(--hot)}
+.step-label-badge.warm{background:var(--warm-bg);color:var(--warm)}
+.step-label-badge.cold{background:var(--cold-bg);color:var(--cold)}
+.step-label-badge.inactive{background:var(--bg3);color:var(--text3)}
+.seq-type-pill{font-size:10px;padding:2px 7px;border-radius:99px;font-weight:600}
+.seq-type-pill.call{background:#3b82f620;color:#60a5fa}
+.seq-type-pill.sms{background:#22c55e20;color:#4ade80}
+.seq-type-pill.email{background:#a78bfa20;color:#c4b5fd}
 </style>
 </head>
 <body>
@@ -443,50 +488,195 @@ async function callFn(name, body) {
 async function processOutcome(leadId, taskId, outcome) {
   if (processingOutcome) return;
   processingOutcome = true;
-
-  // Disable all outcome buttons
   document.querySelectorAll('.outcome-btn').forEach(b => b.disabled = true);
   showToast('Processing...', 'info');
 
+  // Try Edge Function first, fall back to direct DB if unavailable
+  let usedEdgeFunction = false;
   try {
     const result = await callFn('process-outcomes', {
-      lead_id: leadId,
-      task_id: taskId || null,
-      outcome,
+      lead_id: leadId, task_id: taskId || null, outcome,
     });
-
+    usedEdgeFunction = true;
     const msgs = {
       workflow_paused:    '✓ Lead answered — workflow paused',
-      retry_scheduled:    `No answer logged — next call scheduled`,
-      downgraded_to_warm: `Lead downgraded to WARM — warm workflow started`,
+      retry_scheduled:    'No answer logged — next call scheduled',
+      downgraded_to_warm: 'Lead downgraded to WARM — warm workflow started',
       lead_inactive:      'Lead marked inactive — all tasks stopped',
     };
-
-    const type = outcome === 'answered' ? 'success'
-      : outcome === 'notinterested' ? 'warning' : 'info';
-
+    const type = outcome==='answered'?'success':outcome==='notinterested'?'warning':'info';
     showToast(msgs[result.action] || 'Outcome logged', type);
-
     if (outcome === 'answered') openAnsweredModal(leadId);
-
-    await loadData();
-    if (selectedLead?.id === leadId) {
-      selectedLead = allLeads.find(l => l.id === leadId) || null;
+  } catch(e) {
+    // Edge Function unavailable — run locally
+    console.warn('Edge Function unavailable, running locally:', e.message);
+    try {
+      await localOutcome(leadId, taskId, outcome);
+    } catch(e2) {
+      showToast('Error: ' + e2.message, 'error');
+      document.querySelectorAll('.outcome-btn').forEach(b => b.disabled = false);
+      processingOutcome = false;
+      return;
     }
-    render();
+  }
 
-  } catch (e) {
-    showToast(`Error: ${e.message}`, 'error');
-    console.error('processOutcome failed:', e);
-    // Re-enable buttons on failure so user can retry
-    document.querySelectorAll('.outcome-btn').forEach(b => b.disabled = false);
-  } finally {
-    processingOutcome = false;
+  await loadData();
+  if (selectedLead?.id === leadId) selectedLead = allLeads.find(l=>l.id===leadId) || null;
+  processingOutcome = false;
+  render();
+}
+
+async function localOutcome(leadId, taskId, outcome) {
+  const now  = new Date();
+  const lead = allLeads.find(l=>l.id===leadId);
+  if (!lead) throw new Error('Lead not found');
+
+  // Get task type so we can route correctly
+  const task = taskId ? allTasks.find(t=>t.id===taskId) : null;
+  const taskType = task?.action_type || 'call';
+  const stepLabel = task?.sequence_step_label || getTaskSequenceLabel(task||{}, lead) || '';
+
+  // Mark task completed
+  if (taskId) {
+    await sb.from('tasks').update({
+      status:'completed', outcome, completed_at:now.toISOString()
+    }).eq('id', taskId);
+  }
+
+  // ── EMAIL SENT / REPLIED / BOUNCED ───────────────────────────
+  if (taskType === 'email' && (outcome === 'sent' || outcome === 'replied' || outcome === 'bounced')) {
+    const newEmailCount = (lead.emails_sent||0) + 1;
+    const outcomeLabels = {sent:'Email sent', replied:'Email — reply received', bounced:'Email bounced'};
+    await sb.from('leads').update({
+      emails_sent: newEmailCount,
+      last_contact_at: now.toISOString(),
+    }).eq('id', leadId);
+    await sb.from('activities').insert({ lead_id:leadId, user_id:currentUser.id,
+      type:'email',
+      title: outcomeLabels[outcome] + (stepLabel ? ` — ${stepLabel}` : ''),
+      description: outcome === 'bounced' ? 'Email bounced — check address' : 'Sequence step completed',
+      outcome });
+    const toastMap = {sent:'✓ Email marked sent — sequence continues', replied:'✓ Reply received!', bounced:'Email bounced — step logged'};
+    showToast(toastMap[outcome]||'Email logged', outcome==='bounced'?'warning':'success');
+    return; // workflow continues naturally — no new task needed
+  }
+
+  // ── SMS SENT / REPLIED / FAILED ──────────────────────────────
+  if (taskType === 'sms' && (outcome === 'sent' || outcome === 'replied' || outcome === 'failed')) {
+    const newSmsCount = (lead.sms_sent||0) + 1;
+    const outcomeLabels = {sent:'SMS sent', replied:'SMS — reply received', failed:'SMS failed'};
+    await sb.from('leads').update({
+      sms_sent: newSmsCount,
+      last_contact_at: now.toISOString(),
+    }).eq('id', leadId);
+    await sb.from('activities').insert({ lead_id:leadId, user_id:currentUser.id,
+      type:'sms',
+      title: outcomeLabels[outcome] + (stepLabel ? ` — ${stepLabel}` : ''),
+      description: outcome === 'failed' ? 'SMS delivery failed' : 'Sequence step completed',
+      outcome });
+    const toastMap = {sent:'✓ SMS marked sent — sequence continues', replied:'✓ Reply received!', failed:'SMS failed — step logged'};
+    showToast(toastMap[outcome]||'SMS logged', outcome==='failed'?'warning':'success');
+    return; // workflow continues naturally
+  }
+
+  // ── CALL: NO ANSWER ──────────────────────────────────────────
+  if (outcome === 'noanswer') {
+    const newAttempts = (lead.call_attempts||0) + 1;
+    const retryH = workflowCfg.hot_retry_hours || 3;
+    const nextCall = new Date(now.getTime() + retryH*3600000);
+    const maxAtt = workflowCfg.hot_max_attempts || 6;
+    const shouldDowngrade = newAttempts >= maxAtt && lead.status === 'hot';
+
+    await sb.from('leads').update({
+      call_attempts: newAttempts,
+      last_contact_at: now.toISOString(),
+      next_action_label: shouldDowngrade ? 'Warm Day 1 — Call' : `Call retry in ${retryH}h`,
+      ...(shouldDowngrade ? { status:'warm', score:Math.max(0,(lead.score||60)-15) } : {})
+    }).eq('id', leadId);
+
+    await sb.from('activities').insert({ lead_id:leadId, user_id:currentUser.id,
+      type:'call', title:`Call — No Answer #${newAttempts}`, description:'No answer logged', outcome:'noanswer' });
+
+    if (!shouldDowngrade) {
+      await sb.from('tasks').insert({
+        lead_id:leadId, lead_name:lead.name, action_type:'call',
+        due_at:nextCall.toISOString(), priority:'high', user_id:currentUser.id,
+        attempt_number:newAttempts+1,
+        sequence_step_label:`Retry Call #${newAttempts+1}`,
+        sequence_type: lead.status,
+      });
+      showToast(`No answer — retry call in ${retryH}h`, 'info');
+    } else {
+      const MS=86400000;
+      const cfg = workflowCfg;
+      const warmSteps = [
+        {days:0,  a:cfg.warm_day1_action||'call',  p:'high',   step:1, lbl:'Day 1 — Call'},
+        {days:3,  a:cfg.warm_day3_action||'email', p:'medium', step:2, lbl:'Day 3 — Email'},
+        {days:7,  a:cfg.warm_day7_action||'call',  p:'medium', step:3, lbl:'Day 7 — Call'},
+        {days:14, a:cfg.warm_day14_action||'email',p:'low',    step:4, lbl:'Day 14 — Check-In'},
+      ];
+      for (const s of warmSteps) {
+        await sb.from('tasks').insert({
+          lead_id:leadId, lead_name:lead.name, action_type:s.a,
+          due_at:new Date(now.getTime()+s.days*MS).toISOString(), priority:s.p, user_id:currentUser.id,
+          sequence_type:'warm', sequence_step_number:s.step, sequence_step_label:s.lbl,
+        });
+      }
+      await sb.from('tasks').update({status:'cancelled'})
+        .eq('lead_id',leadId).eq('status','pending').neq('id',taskId||'00000000-0000-0000-0000-000000000000');
+      await sb.from('activities').insert({ lead_id:leadId, user_id:currentUser.id,
+        type:'system', title:'Auto-downgraded to WARM', description:`${maxAtt} call attempts — warm workflow started` });
+      showToast(`${lead.name} downgraded to WARM after ${newAttempts} attempts`, 'warning');
+    }
+    return;
+  }
+
+  // ── CALL: VOICEMAIL ──────────────────────────────────────────
+  if (outcome === 'voicemail') {
+    const newAttempts = (lead.call_attempts||0) + 1;
+    const nextCall = new Date(now.getTime() + 4*3600000);
+    await sb.from('leads').update({
+      call_attempts:newAttempts, last_contact_at:now.toISOString(), next_action_label:'Call retry in 4h'
+    }).eq('id', leadId);
+    await sb.from('activities').insert({ lead_id:leadId, user_id:currentUser.id,
+      type:'call', title:'Call — Voicemail', description:'Left voicemail message', outcome:'voicemail' });
+    await sb.from('tasks').insert({
+      lead_id:leadId, lead_name:lead.name, action_type:'call',
+      due_at:nextCall.toISOString(), priority:'high', user_id:currentUser.id,
+      sequence_step_label:'Retry Call (Voicemail)', sequence_type:lead.status,
+    });
+    showToast('Voicemail logged — retry in 4h', 'info');
+    return;
+  }
+
+  // ── CALL: ANSWERED ───────────────────────────────────────────
+  if (outcome === 'answered') {
+    await sb.from('leads').update({
+      engaged:true, last_contact_at:now.toISOString(), next_action_label:'Follow-up scheduled'
+    }).eq('id', leadId);
+    await sb.from('tasks').update({status:'cancelled'}).eq('lead_id',leadId).eq('status','pending');
+    await sb.from('activities').insert({ lead_id:leadId, user_id:currentUser.id,
+      type:'call', title:'Call — Answered', description:'Lead answered — workflow paused', outcome:'answered' });
+    showToast('✓ Lead answered! Workflow paused.', 'success');
+    openAnsweredModal(leadId);
+    return;
+  }
+
+  // ── NOT INTERESTED (any task type) ───────────────────────────
+  if (outcome === 'notinterested') {
+    await sb.from('leads').update({ status:'inactive', score:0, engaged:false, next_action_label:'Inactive' }).eq('id', leadId);
+    await sb.from('tasks').update({status:'cancelled'}).eq('lead_id',leadId).eq('status','pending');
+    await sb.from('activities').insert({ lead_id:leadId, user_id:currentUser.id,
+      type:'system', title:'Lead marked inactive', description:'Not interested — all tasks stopped' });
+    showToast('Lead marked inactive — all tasks stopped', 'warning');
   }
 }
 
 async function quickOutcome(leadId, outcome) {
-  const task = allTasks.find(t => t.lead_id === leadId && t.status === 'pending');
+  // Find the next pending task for this lead (sorted by due_at)
+  const task = allTasks
+    .filter(t => t.lead_id === leadId && t.status === 'pending')
+    .sort((a,b) => new Date(a.due_at) - new Date(b.due_at))[0];
   await processOutcome(leadId, task?.id || null, outcome);
 }
 
@@ -495,6 +685,10 @@ async function logOutcomeTask(taskId, leadId, outcome) {
 }
 
 // ── UTILITIES ─────────────────────────────────────────────────
+function outcomeLabel(o) {
+  return {sent:'Sent ✓',replied:'Replied',answered:'Answered',noanswer:'No answer',
+    voicemail:'Voicemail',bounced:'Bounced',failed:'Failed',notinterested:'Not interested'}[o] || o || 'Done';
+}
 function initials(name) { return (name||'?').split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase(); }
 
 function fmtTime(iso) {
@@ -551,6 +745,173 @@ function showView(v, el) {
   render();
 }
 
+// ── SEQUENCE HELPERS ──────────────────────────────────────────
+function getSequenceDef(status, cfg) {
+  cfg = cfg || workflowCfg;
+  if (status === 'hot') return [
+    {step:1, day:0,  label:'Immediate Call',    action:'call',  desc:'Call now'},
+    {step:2, day:0,  label:'SMS if No Answer',  action:'sms',   desc:'Auto SMS'},
+    {step:3, day:1,  label:'2nd Call',          action:'call',  desc:`+${cfg.hot_retry_hours||3}h retry`},
+    {step:4, day:1,  label:'3rd Call',          action:'call',  desc:'Same-day retry'},
+    {step:5, day:2,  label:'Day 2 Follow-up',   action:'call',  desc:'Next-day attempt'},
+  ];
+  if (status === 'warm') return [
+    {step:1, day:1,  label:'Day 1 — Call',      action:cfg.warm_day1_action||'call',  desc:'First touch'},
+    {step:2, day:3,  label:'Day 3 — Email',     action:cfg.warm_day3_action||'email', desc:'Email follow-up'},
+    {step:3, day:7,  label:'Day 7 — Call',      action:cfg.warm_day7_action||'call',  desc:'Mid-sequence call'},
+    {step:4, day:14, label:'Day 14 — Check-In', action:cfg.warm_day14_action||'email',desc:'Final check-in'},
+  ];
+  return [
+    {step:1, day:7,  label:'Day 7 — Light Touch', action:cfg.cold_day7_action||'sms',   desc:'Light touch'},
+    {step:2, day:30, label:'Day 30 — Re-Engage',  action:cfg.cold_day30_action||'email', desc:'Re-engagement'},
+    {step:3, day:60, label:'Day 60 — Recycle',    action:cfg.cold_day60_action||'email', desc:'Final recycle'},
+  ];
+}
+
+// Return the correct outcome button label and outcome value for a task type
+function getOutcomeButtons(task) {
+  const t = task.action_type;
+  if (t === 'email') return [
+    {label:'✓ Sent',        outcome:'sent',          cls:'sent'},
+    {label:'↩ Replied',     outcome:'replied',        cls:'answered'},
+    {label:'✕ Bounced',     outcome:'bounced',        cls:'noanswer'},
+    {label:'Not Interested',outcome:'notinterested',  cls:'notint'},
+  ];
+  if (t === 'sms') return [
+    {label:'✓ Sent',        outcome:'sent',          cls:'sent'},
+    {label:'↩ Replied',     outcome:'replied',        cls:'answered'},
+    {label:'✕ Failed',      outcome:'failed',         cls:'noanswer'},
+    {label:'Not Interested',outcome:'notinterested',  cls:'notint'},
+  ];
+  // call (default)
+  return [
+    {label:'✓ Answered',    outcome:'answered',       cls:'answered'},
+    {label:'No Answer',     outcome:'noanswer',       cls:'noanswer'},
+    {label:'Voicemail',     outcome:'voicemail',      cls:''},
+    {label:'Not Interested',outcome:'notinterested',  cls:'notint'},
+  ];
+}
+
+// True if outcome counts as workflow-continuing completion (not "answered" a call)
+function isCompletionOutcome(outcome) {
+  return ['sent','replied','bounced','failed'].includes(outcome);
+}
+
+// Get task sequence label — use stored label first, fall back to sequence def
+function getTaskLabel(task, lead) {
+  if (task.sequence_step_label) return task.sequence_step_label;
+  return getTaskSequenceLabel(task, lead);
+}
+
+function getTaskSequenceLabel(task, lead) {
+  if (!lead) return task.action_type;
+  const seq = getSequenceDef(lead.status);
+  const leadTasks = allTasks
+    .filter(t => t.lead_id === lead.id)
+    .sort((a,b) => new Date(a.due_at) - new Date(b.due_at));
+  const idx = leadTasks.findIndex(t => t.id === task.id);
+  if (idx >= 0 && idx < seq.length) return seq[idx].label;
+  const icons = {call:'Call',sms:'SMS',email:'Email'};
+  return icons[task.action_type] || task.action_type;
+}
+
+function getLeadSequenceProgress(leadId) {
+  const lead = allLeads.find(l=>l.id===leadId);
+  if (!lead) return {done:0,total:0,pct:0};
+  const seq = getSequenceDef(lead.status);
+  const leadTasks = allTasks.filter(t=>t.lead_id===leadId&&t.status!=='cancelled');
+  const done = leadTasks.filter(t=>t.status==='completed').length;
+  const total = Math.max(seq.length, leadTasks.length);
+  return {done, total, pct: total > 0 ? Math.round((done/total)*100) : 0};
+}
+
+function renderLeadSequenceCard(lead) {
+  const leadTasks = allTasks
+    .filter(t=>t.lead_id===lead.id && t.status!=='cancelled')
+    .sort((a,b)=>new Date(a.due_at)-new Date(b.due_at));
+  const seq = getSequenceDef(lead.status);
+  const prog = getLeadSequenceProgress(lead.id);
+  const now = new Date();
+  const nextTask = leadTasks.find(t=>t.status==='pending');
+  const lastDone = [...leadTasks].reverse().find(t=>t.status==='completed');
+  const hasOverdue = leadTasks.some(t=>t.overdue&&t.status==='pending');
+  const statusEmoji = {hot:'🔥',warm:'🌡',cold:'❄️',inactive:'⛔'}[lead.status]||'';
+  const typeIcons = {call:'📞',sms:'💬',email:'✉️'};
+
+  // Build sequence steps — match by sequence_step_number if available, else by index
+  const stepsHtml = seq.map((step, i) => {
+    let task = leadTasks.find(t => t.sequence_step_number === step.step) || leadTasks[i];
+    let dotClass = 'pending', dotContent = i+1;
+    let labelClass = 'pending';
+
+    if (task) {
+      if (task.status === 'completed') { dotClass='done'; dotContent='✓'; labelClass='done'; }
+      else if (task.overdue) { dotClass='overdue'; dotContent='!'; labelClass='active'; }
+      else if (task === nextTask) { dotClass='active'; dotContent='→'; labelClass='active'; }
+    }
+
+    const timeInfo = task
+      ? (task.status==='completed'
+          ? ({sent:'Sent',replied:'Replied',answered:'Answered',noanswer:'No answer',voicemail:'Voicemail',bounced:'Bounced',failed:'Failed'}[task.outcome]||task.outcome||'Done')
+          : fmtDue(task.due_at))
+      : step.desc;
+
+    return `<div class="seq-step ${dotClass}">
+      <div class="seq-dot ${dotClass}">${dotContent}</div>
+      <div class="seq-step-label ${labelClass}">${step.label}<br><span style="font-size:9px;opacity:.7">${timeInfo}</span></div>
+    </div>`;
+  }).join('');
+
+  // Last/next action info
+  const lastStr = lastDone
+    ? `Last: ${getTaskSequenceLabel(lastDone,lead)} · ${lastDone.outcome||'done'} · ${fmtTime(lastDone.completed_at||lastDone.due_at)}`
+    : 'No actions yet';
+  const nextStr = nextTask
+    ? `Next: ${getTaskSequenceLabel(nextTask,lead)} ${typeIcons[nextTask.action_type]||''} · ${fmtDue(nextTask.due_at)}`
+    : lead.engaged ? 'Lead engaged ✓' : 'Sequence complete';
+
+  return `
+  <div class="seq-container ${lead.status} ${hasOverdue?'overdue-lead':''}" onclick="openLeadDetail('${lead.id}')">
+    <div class="seq-header">
+      <div class="avatar ${lead.status}" style="width:36px;height:36px;font-size:12px;border-radius:50%;flex-shrink:0">${initials(lead.name)}</div>
+      <div class="seq-lead-info">
+        <div style="display:flex;align-items:center;gap:8px">
+          <div class="seq-lead-name">${lead.name}</div>
+          <span class="step-label-badge ${lead.status}">${statusEmoji} ${lead.status.toUpperCase()}</span>
+          ${hasOverdue?'<span style="font-size:9px;font-weight:700;color:var(--yellow);background:var(--yellow-bg);padding:2px 6px;border-radius:99px">OVERDUE</span>':''}
+        </div>
+        <div class="seq-meta">
+          <span>${lead.phone}</span>
+          <span>·</span>
+          <span style="color:var(--text2)">${prog.done}/${prog.total} steps done</span>
+        </div>
+        <div class="seq-progress-bar" style="margin-top:6px">
+          <div class="seq-progress-fill ${lead.status}" style="width:${prog.pct}%"></div>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--text3);text-align:right;flex-shrink:0">
+        <div style="color:var(--text2);font-weight:500">${prog.pct}%</div>
+        <div>complete</div>
+      </div>
+    </div>
+    <div class="seq-last-next" onclick="event.stopPropagation()">
+      <span>⏮ <strong>${lastStr}</strong></span>
+      <span>⏭ <strong style="color:${nextTask?'var(--text)':'var(--green)'}">${nextStr}</strong></span>
+    </div>
+    <div class="seq-steps" onclick="event.stopPropagation()">${stepsHtml}</div>
+    ${nextTask ? `
+    <div class="seq-step-actions" onclick="event.stopPropagation()">
+      <div class="seq-step-info">
+        <span class="seq-type-pill ${nextTask.action_type}">${typeIcons[nextTask.action_type]} ${getTaskLabel(nextTask, lead)}</span>
+        <span style="margin-left:8px;color:var(--text3)">${fmtDue(nextTask.due_at)}</span>
+      </div>
+      ${getOutcomeButtons(nextTask).map(b =>
+        `<button class="outcome-btn ${b.cls}" onclick="logOutcomeTask('${nextTask.id}','${lead.id}','${b.outcome}')">${b.label}</button>`
+      ).join('')}
+    </div>` : ''}
+  </div>`;
+}
+
 function render() {
   const main = document.getElementById('main-content');
   if (!main) return;
@@ -574,6 +935,10 @@ function renderDashboard(main) {
   const cold = allLeads.filter(l=>l.status==='cold').length;
   const od   = allTasks.filter(t=>t.overdue&&t.status==='pending').length;
   const pend = allTasks.filter(t=>t.status==='pending');
+  const activeLeads = allLeads.filter(l=>l.status!=='inactive').sort((a,b)=>{
+    const order={hot:0,warm:1,cold:2};
+    return (order[a.status]??3)-(order[b.status]??3);
+  });
 
   main.innerHTML = `
   <div class="topbar">
@@ -587,12 +952,18 @@ function renderDashboard(main) {
       <div class="stat-card cold"><div class="stat-label">❄️ Cold</div><div class="stat-val">${cold}</div><div class="stat-sub">Nurture</div></div>
       <div class="stat-card overdue"><div class="stat-label">⏰ Overdue</div><div class="stat-val">${od}</div><div class="stat-sub">Needs action</div></div>
     </div>
-    <div class="section-header"><div class="section-title">🔥 Hot Leads — Act Now</div><div class="section-count">${hot}</div></div>
-    <div class="tasks-grid">${allLeads.filter(l=>l.status==='hot').map(renderHotCard).join('') ||
-      '<div class="empty-state"><div class="icon">🎉</div><p>No hot leads</p></div>'}</div>
-    <div class="section-header"><div class="section-title">📋 Today's Tasks</div><div class="section-count">${pend.length} pending · ${od} overdue</div></div>
-    <div class="tasks-grid">${pend.map(renderTaskCard).join('') ||
-      '<div class="empty-state"><div class="icon">✅</div><p>All done!</p></div>'}</div>
+    ${hot > 0 ? `
+    <div class="section-header"><div class="section-title">🔥 Hot Leads — Call Now</div><div class="section-count">${hot} leads</div></div>
+    ${allLeads.filter(l=>l.status==='hot').map(renderLeadSequenceCard).join('')}` : ''}
+    ${warm > 0 ? `
+    <div class="section-header" style="margin-top:${hot>0?'16px':'0'}"><div class="section-title">🌡 Warm Sequences</div><div class="section-count">${warm} in progress</div></div>
+    ${allLeads.filter(l=>l.status==='warm').map(renderLeadSequenceCard).join('')}` : ''}
+    ${hot===0 && warm===0 ? `
+    <div class="section-header"><div class="section-title">📋 Active Leads</div><div class="section-count">${activeLeads.length}</div></div>
+    ${activeLeads.map(renderLeadSequenceCard).join('') || '<div class="empty-state"><div class="icon">🎉</div><p>No active leads — add one to start</p></div>'}` : ''}
+    ${cold > 0 ? `
+    <div class="section-header" style="margin-top:16px"><div class="section-title">❄️ Cold Leads — Nurture</div><div class="section-count">${cold}</div></div>
+    ${allLeads.filter(l=>l.status==='cold').map(renderLeadSequenceCard).join('')}` : ''}
   </div>`;
 }
 
@@ -626,31 +997,35 @@ function renderHotCard(l) {
 }
 
 function renderTaskCard(task) {
-  const lead = allLeads.find(l=>l.id===task.lead_id);
-  const s    = lead?.status||'warm';
+  const lead  = allLeads.find(l=>l.id===task.lead_id);
+  const s     = lead?.status||'warm';
   const icons = {call:'📞',sms:'💬',email:'✉️'};
   const done  = task.status==='completed';
-  const calBadge = task.external_event_id
-    ? `<span class="cal-badge synced">📅</span>`
-    : task.calendar_sync_status === 'failed'
-      ? `<span class="cal-badge failed">📅✕</span>` : '';
+  const seqLabel = getTaskSequenceLabel(task, lead);
+  const statusEmoji = {hot:'🔥',warm:'🌡',cold:'❄️',inactive:'⛔'}[s]||''
+  const calBadge = task.external_event_id ? `<span class="cal-badge synced">📅</span>` : '';
   return `
   <div class="task-card ${s} ${task.overdue?'overdue':''}" style="${done?'opacity:.55':''}">
     <div class="task-top">
       <div style="display:flex;align-items:center;gap:10px">
         <div class="priority ${task.priority}"></div>
         <div class="avatar ${s}">${initials(task.lead_name)}</div>
-        <div><div class="task-name">${task.lead_name}${calBadge}</div>
-          <div style="font-size:11px;color:var(--text3)">Due: ${fmtDue(task.due_at)}</div></div>
+        <div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <div class="task-name">${task.lead_name}${calBadge}</div>
+            <span class="step-label-badge ${s}">${statusEmoji} ${s.toUpperCase()}</span>
+          </div>
+          <div style="font-size:11px;color:var(--text2);font-weight:500;margin-top:1px">${seqLabel}</div>
+          <div style="font-size:11px;color:var(--text3)">Due: ${fmtDue(task.due_at)}</div>
+        </div>
       </div>
       <div class="task-type ${task.action_type}">${icons[task.action_type]||'📋'} ${task.action_type[0].toUpperCase()+task.action_type.slice(1)}</div>
     </div>
-    ${done ? `<div style="font-size:12px;color:var(--green);margin-top:4px">✓ Completed · ${task.outcome||''}</div>` : `
+    ${done ? `<div style="font-size:12px;color:var(--green);margin-top:4px">✓ ${outcomeLabel(task.outcome)} · ${fmtTime(task.completed_at||task.due_at)}</div>` : `
     <div class="task-actions">
-      <button class="outcome-btn answered" onclick="logOutcomeTask('${task.id}','${task.lead_id}','answered')">✓ Done</button>
-      <button class="outcome-btn noanswer" onclick="logOutcomeTask('${task.id}','${task.lead_id}','noanswer')">No Answer</button>
-      ${task.action_type==='call'?`<button class="outcome-btn" onclick="logOutcomeTask('${task.id}','${task.lead_id}','voicemail')">Voicemail</button>`:''}
-      <button class="outcome-btn notint" onclick="logOutcomeTask('${task.id}','${task.lead_id}','notinterested')">Not Interested</button>
+      ${getOutcomeButtons(task).map(b =>
+        `<button class="outcome-btn ${b.cls}" onclick="logOutcomeTask('${task.id}','${task.lead_id}','${b.outcome}')">${b.label}</button>`
+      ).join('')}
     </div>`}
   </div>`;
 }
@@ -701,17 +1076,33 @@ function renderTasksView(main) {
   const pend = allTasks.filter(t=>t.status==='pending');
   const done = allTasks.filter(t=>t.status==='completed');
   const od   = pend.filter(t=>t.overdue);
+
+  // Group pending tasks by lead
+  const leadIds = [...new Set(pend.map(t=>t.lead_id))];
+  const leadsWithTasks = leadIds
+    .map(id => allLeads.find(l=>l.id===id))
+    .filter(Boolean)
+    .sort((a,b)=>{const o={hot:0,warm:1,cold:2};return (o[a.status]??3)-(o[b.status]??3);});
+
   main.innerHTML = `
-  <div class="topbar"><div class="topbar-title">Task Queue</div>
-    <div style="font-size:13px;color:var(--text3)">${pend.length} pending · ${done.length} completed</div>
+  <div class="topbar"><div class="topbar-title">Follow-Up Sequences</div>
+    <div style="font-size:13px;color:var(--text3)">${pend.length} pending · ${od.length} overdue · ${done.length} completed</div>
     <button class="btn btn-sm" onclick="loadTasks().then(render)">🔄 Refresh</button></div>
   <div class="content">
-    <div class="section-header"><div class="section-title">⏰ Overdue</div><div class="section-count">${od.length}</div></div>
-    <div class="tasks-grid">${od.map(renderTaskCard).join('')||'<div class="empty-state"><div class="icon">✅</div><p>No overdue tasks</p></div>'}</div>
-    <div class="section-header" style="margin-top:8px"><div class="section-title">📋 Pending</div></div>
-    <div class="tasks-grid">${pend.filter(t=>!t.overdue).map(renderTaskCard).join('')||'<div class="empty-state"><div class="icon">🎉</div><p>All caught up!</p></div>'}</div>
-    <div class="section-header" style="margin-top:8px"><div class="section-title">✅ Completed</div></div>
-    <div class="tasks-grid">${done.slice(0,10).map(renderTaskCard).join('')||'<div class="empty-state"><div class="icon">📋</div><p>None yet</p></div>'}</div>
+    ${od.length > 0 ? `
+    <div class="section-header"><div class="section-title">⏰ Overdue — Act Now</div><div class="section-count">${od.length}</div></div>
+    <div class="tasks-grid" style="margin-bottom:20px">${od.map(renderTaskCard).join('')}</div>` : ''}
+
+    <div class="section-header" style="margin-top:${od.length?'0':'0'}">
+      <div class="section-title">📋 Sequences by Lead</div>
+      <div class="section-count">${leadsWithTasks.length} leads</div>
+    </div>
+    ${leadsWithTasks.map(lead => renderLeadSequenceCard(lead)).join('') ||
+      '<div class="empty-state"><div class="icon">🎉</div><p>All caught up!</p></div>'}
+
+    ${done.length > 0 ? `
+    <div class="section-header" style="margin-top:20px"><div class="section-title">✅ Recently Completed</div></div>
+    <div class="tasks-grid">${done.slice(0,6).map(renderTaskCard).join('')}</div>` : ''}
   </div>`;
 }
 
@@ -966,19 +1357,18 @@ async function renderLeadDetail(main) {
           </div>`).join('') : '<div style="font-size:13px;color:var(--text3)">No activity yet</div>'}
         </div>
         <div class="detail-section">
-          <h3>Workflow Progress</h3>
-          <div>${wfSteps.map((s,i)=>`
-          <div class="wf-step">
-            <div class="wf-dot ${s.status}">${s.status==='done'?'✓':s.status==='active'?'→':(i+1)}</div>
-            <div class="wf-text"><div class="wf-title">${s.title}</div><div class="wf-time">${s.time}</div></div>
-          </div>`).join('')}</div>
+          <h3>Follow-Up Sequence</h3>
+          ${buildDetailSequence(l)}
           <div style="margin-top:16px">
             <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Log Outcome</div>
-            <div style="display:flex;gap:6px;flex-wrap:wrap">
-              <button class="outcome-btn answered" onclick="quickOutcome('${l.id}','answered')">✓ Answered</button>
-              <button class="outcome-btn noanswer" onclick="quickOutcome('${l.id}','noanswer')">No Answer</button>
-              <button class="outcome-btn" onclick="quickOutcome('${l.id}','voicemail')">Voicemail</button>
-              <button class="outcome-btn notint" onclick="quickOutcome('${l.id}','notinterested')">Not Interested</button>
+            <div style="display:flex;gap:6px;flex-wrap:wrap" id="detail-outcome-btns">
+              ${(()=>{
+                const nt = allTasks.filter(t=>t.lead_id===l.id&&t.status==='pending').sort((a,b)=>new Date(a.due_at)-new Date(b.due_at))[0];
+                if (!nt) return '<span style="font-size:12px;color:var(--text3)">No pending tasks</span>';
+                return getOutcomeButtons(nt).map(b =>
+                  `<button class="outcome-btn ${b.cls}" onclick="logOutcomeTask('${nt.id}','${l.id}','${b.outcome}')">${b.label}</button>`
+                ).join('');
+              })()}
             </div>
           </div>
           <div style="margin-top:16px">
@@ -995,6 +1385,58 @@ async function renderLeadDetail(main) {
       </div>
     </div>
   </div>`;
+}
+
+function buildDetailSequence(lead) {
+  const seq = getSequenceDef(lead.status);
+  const lTasks = allTasks
+    .filter(t => t.lead_id === lead.id && t.status !== 'cancelled')
+    .sort((a,b) => new Date(a.due_at) - new Date(b.due_at));
+  const prog = getLeadSequenceProgress(lead.id);
+  const typeIcons = {call:'📞', sms:'💬', email:'✉️'};
+
+  const stepsHtml = seq.map((step, i) => {
+    // Match by sequence_step_number if available, fall back to index
+    let task = lTasks.find(t => t.sequence_step_number === step.step);
+    if (!task) task = lTasks[i];
+
+    const isDone    = task && task.status === 'completed';
+    const isOverdue = task && task.overdue && task.status === 'pending';
+    const completedSoFar = lTasks.filter(t => t.status === 'completed').length;
+    const isActive  = task && task.status === 'pending' && completedSoFar === i;
+    const dotClass  = isDone ? 'done' : isOverdue ? 'overdue' : isActive ? 'active' : 'pending';
+    const dotIcon   = isDone ? '✓'   : isOverdue ? '!'       : isActive ? '→'      : (i+1);
+
+    // Show outcome label for completed steps
+    let timeStr;
+    if (isDone) {
+      const outcomeLabel = {
+        sent:'Sent', replied:'Replied', answered:'Answered',
+        noanswer:'No answer', voicemail:'Voicemail', bounced:'Bounced', failed:'Failed'
+      }[task.outcome] || task.outcome || 'Done';
+      timeStr = '✓ ' + outcomeLabel + ' · ' + fmtTime(task.completed_at || task.due_at);
+    } else if (task) {
+      timeStr = (isOverdue ? '⚠ ' : '') + fmtDue(task.due_at);
+    } else {
+      timeStr = step.desc;
+    }
+
+    return '<div class="wf-step">'
+      + '<div class="wf-dot ' + dotClass + '">' + dotIcon + '</div>'
+      + '<div class="wf-text">'
+      + '<div class="wf-title">' + step.label + ' ' + (typeIcons[step.action]||'') + '</div>'
+      + '<div class="wf-time">' + timeStr + '</div>'
+      + '</div></div>';
+  }).join('');
+
+  return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">'
+    + '<div style="font-size:12px;color:var(--text3)">' + prog.done + ' of ' + prog.total + ' steps done</div>'
+    + '<div style="flex:1;height:4px;background:var(--border);border-radius:99px;overflow:hidden">'
+    + '<div style="height:100%;width:' + prog.pct + '%;background:var(--' + lead.status + ');border-radius:99px"></div>'
+    + '</div>'
+    + '<div style="font-size:12px;font-weight:600;color:var(--' + lead.status + ')">' + prog.pct + '%</div>'
+    + '</div>'
+    + stepsHtml;
 }
 
 function getWorkflowSteps(lead, completedCount) {
@@ -1214,14 +1656,24 @@ async function addLead() {
       type:'system', title:`Lead added as ${status.toUpperCase()}`,
       description:'Created directly (Edge Function unavailable)' });
 
-    const sched = status==='hot' ? [[0,'call','high']]
-      : status==='warm' ? [[0,'call','high'],[3,'email','medium'],[7,'call','medium'],[14,'email','low']]
-      : [[7,'sms','medium'],[30,'email','low'],[60,'email','low']];
+    const schedDef = status==='hot'
+      ? [{d:0, a:'call',  p:'high',   step:1, lbl:'Immediate Call'}]
+      : status==='warm'
+        ? [{d:0,  a:workflowCfg.warm_day1_action||'call',  p:'high',   step:1, lbl:'Day 1 — Call'},
+           {d:3,  a:workflowCfg.warm_day3_action||'email', p:'medium', step:2, lbl:'Day 3 — Email'},
+           {d:7,  a:workflowCfg.warm_day7_action||'call',  p:'medium', step:3, lbl:'Day 7 — Call'},
+           {d:14, a:workflowCfg.warm_day14_action||'email',p:'low',    step:4, lbl:'Day 14 — Check-In'}]
+        : [{d:7,  a:workflowCfg.cold_day7_action||'sms',   p:'medium', step:1, lbl:'Day 7 — Light Touch'},
+           {d:30, a:workflowCfg.cold_day30_action||'email', p:'low',   step:2, lbl:'Day 30 — Re-Engage'},
+           {d:60, a:workflowCfg.cold_day60_action||'email', p:'low',   step:3, lbl:'Day 60 — Recycle'}];
 
-    const taskRows = sched.map(([d,a,p]) => ({
-      lead_id:lead.id, lead_name:lead.name, action_type:a,
-      due_at: new Date(now.getTime()+d*MS).toISOString(),
-      priority:p, user_id:currentUser.id,
+    const taskRows = schedDef.map(s => ({
+      lead_id:lead.id, lead_name:lead.name, action_type:s.a,
+      due_at: new Date(now.getTime()+s.d*MS).toISOString(),
+      priority:s.p, user_id:currentUser.id,
+      sequence_type: status,
+      sequence_step_number: s.step,
+      sequence_step_label: s.lbl,
     }));
     if (taskRows.length) await sb.from('tasks').insert(taskRows);
 
