@@ -1,0 +1,1149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FollowUp Engine</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0f1117;--bg2:#181c27;--bg3:#1e2235;--bg4:#242840;
+  --border:#2a2f45;--border2:#333852;
+  --text:#e8eaf0;--text2:#9ba3bf;--text3:#6b7494;
+  --hot:#ff4d6d;--hot-bg:#ff4d6d18;
+  --warm:#f97316;--warm-bg:#f9731618;
+  --cold:#38bdf8;--cold-bg:#38bdf818;
+  --green:#22c55e;--green-bg:#22c55e18;
+  --purple:#a78bfa;--purple-bg:#a78bfa18;
+  --yellow:#eab308;--yellow-bg:#eab30818;
+  --radius:10px;--radius-sm:6px;
+}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;min-height:100vh;overflow-x:hidden}
+.app{display:flex;height:100vh;overflow:hidden}
+.sidebar{width:220px;min-width:220px;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column}
+.sidebar-logo{padding:18px 16px 12px;font-size:15px;font-weight:700;color:var(--text);letter-spacing:-.3px;border-bottom:1px solid var(--border)}
+.sidebar-logo span{color:var(--hot)}
+.nav-section{padding:16px 10px 8px;font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.8px}
+.nav-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:var(--radius-sm);cursor:pointer;color:var(--text2);transition:all .15s;font-size:13.5px;margin:1px 6px}
+.nav-item:hover{background:var(--bg3);color:var(--text)}
+.nav-item.active{background:var(--bg4);color:var(--text);font-weight:500}
+.nav-item .icon{width:16px;text-align:center;font-size:14px}
+.nav-badge{margin-left:auto;background:var(--hot);color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:99px}
+.sidebar-footer{margin-top:auto;padding:12px 16px;border-top:1px solid var(--border);font-size:12px;color:var(--text3)}
+.main{flex:1;overflow-y:auto;display:flex;flex-direction:column}
+.topbar{background:var(--bg2);border-bottom:1px solid var(--border);padding:14px 24px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:10}
+.topbar-title{font-size:16px;font-weight:600;flex:1}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:var(--radius-sm);border:1px solid var(--border2);background:var(--bg3);color:var(--text);cursor:pointer;font-size:13px;font-weight:500;transition:all .15s}
+.btn:hover{background:var(--bg4)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn-primary{background:var(--hot);border-color:var(--hot);color:#fff}
+.btn-primary:hover{background:#e63659;border-color:#e63659}
+.btn-sm{padding:5px 10px;font-size:12px}
+.content{padding:20px 24px;flex:1}
+.stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
+.stat-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px}
+.stat-label{font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+.stat-val{font-size:24px;font-weight:700;line-height:1}
+.stat-sub{font-size:11px;color:var(--text3);margin-top:4px}
+.stat-card.hot .stat-val{color:var(--hot)}
+.stat-card.warm .stat-val{color:var(--warm)}
+.stat-card.cold .stat-val{color:var(--cold)}
+.stat-card.overdue .stat-val{color:var(--yellow)}
+.section-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.section-title{font-size:14px;font-weight:600;color:var(--text)}
+.section-count{font-size:12px;color:var(--text3);background:var(--bg3);padding:2px 8px;border-radius:99px;border:1px solid var(--border)}
+.tasks-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px}
+@media(max-width:900px){.tasks-grid{grid-template-columns:1fr}}
+.task-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;position:relative;overflow:hidden;transition:border-color .15s}
+.task-card:hover{border-color:var(--border2)}
+.task-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px}
+.task-card.hot::before{background:var(--hot)}
+.task-card.warm::before{background:var(--warm)}
+.task-card.cold::before{background:var(--cold)}
+.task-card.overdue{border-color:#eab30840}
+.task-card.overdue::after{content:'OVERDUE';position:absolute;right:12px;top:12px;font-size:9px;font-weight:700;color:var(--yellow);background:var(--yellow-bg);padding:2px 6px;border-radius:99px;letter-spacing:.5px}
+.task-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px}
+.task-name{font-size:14px;font-weight:600;color:var(--text)}
+.task-type{display:flex;align-items:center;gap:5px;font-size:12px;font-weight:500;padding:3px 8px;border-radius:99px}
+.task-type.call{background:#3b82f620;color:#60a5fa}
+.task-type.sms{background:#22c55e20;color:#4ade80}
+.task-type.email{background:#a78bfa20;color:#c4b5fd}
+.task-meta{display:flex;align-items:center;gap:12px;font-size:12px;color:var(--text3);margin-bottom:10px}
+.task-attempts{display:flex;gap:4px;align-items:center}
+.attempt-dot{width:6px;height:6px;border-radius:50%}
+.attempt-dot.done{background:var(--hot)}
+.attempt-dot.empty{background:var(--border2)}
+.task-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.outcome-btn{font-size:11px;padding:4px 8px;border-radius:var(--radius-sm);border:1px solid var(--border2);background:var(--bg3);color:var(--text2);cursor:pointer;transition:all .15s;font-weight:500}
+.outcome-btn:hover{background:var(--bg4);color:var(--text)}
+.outcome-btn.answered:hover{background:#22c55e20;border-color:#22c55e60;color:var(--green)}
+.outcome-btn.noanswer:hover{background:#f9731620;border-color:#f9731660;color:var(--warm)}
+.outcome-btn.notint:hover{background:#ff4d6d20;border-color:#ff4d6d60;color:var(--hot)}
+.outcome-btn:disabled{opacity:.4;cursor:not-allowed}
+.leads-table{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.table-header{display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr 1fr;padding:10px 16px;font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border)}
+.table-row{display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr 1fr;padding:12px 16px;border-bottom:1px solid var(--border);align-items:center;cursor:pointer;transition:background .12s}
+.table-row:last-child{border-bottom:none}
+.table-row:hover{background:var(--bg3)}
+.lead-name-col{display:flex;align-items:center;gap:10px}
+.avatar{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0}
+.avatar.hot{background:var(--hot-bg);color:var(--hot)}
+.avatar.warm{background:var(--warm-bg);color:var(--warm)}
+.avatar.cold{background:var(--cold-bg);color:var(--cold)}
+.avatar.inactive{background:var(--bg3);color:var(--text3)}
+.lead-info .name{font-size:13.5px;font-weight:500;color:var(--text)}
+.lead-info .phone{font-size:11px;color:var(--text3)}
+.status-badge{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:99px;font-size:11px;font-weight:600;letter-spacing:.3px}
+.status-badge.hot{background:var(--hot-bg);color:var(--hot)}
+.status-badge.warm{background:var(--warm-bg);color:var(--warm)}
+.status-badge.cold{background:var(--cold-bg);color:var(--cold)}
+.status-badge.inactive{background:var(--bg3);color:var(--text3)}
+.status-badge::before{content:'';width:5px;height:5px;border-radius:50%;background:currentColor}
+.next-action{font-size:11px;color:var(--text2);background:var(--bg3);padding:3px 7px;border-radius:99px;border:1px solid var(--border)}
+.timeline-item{display:flex;gap:12px;padding:8px 0;position:relative}
+.timeline-item::before{content:'';position:absolute;left:15px;top:28px;bottom:-8px;width:1px;background:var(--border)}
+.timeline-item:last-child::before{display:none}
+.tl-icon{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0;z-index:1}
+.tl-icon.call{background:#3b82f620;color:#60a5fa}
+.tl-icon.sms{background:#22c55e20;color:#4ade80}
+.tl-icon.email{background:#a78bfa20;color:#c4b5fd}
+.tl-icon.system{background:var(--bg3);color:var(--text3)}
+.tl-content .tl-title{font-size:13px;font-weight:500;color:var(--text)}
+.tl-content .tl-sub{font-size:11px;color:var(--text3);margin-top:2px}
+.tl-outcome{display:inline-flex;margin-top:4px;font-size:10px;font-weight:600;padding:2px 6px;border-radius:99px}
+.tl-outcome.answered{background:var(--green-bg);color:var(--green)}
+.tl-outcome.noanswer{background:var(--yellow-bg);color:var(--yellow)}
+.tl-outcome.voicemail{background:var(--purple-bg);color:var(--purple)}
+.lead-detail{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.lead-detail-header{padding:20px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.detail-grid{display:grid;grid-template-columns:repeat(3,1fr);border-bottom:1px solid var(--border)}
+@media(max-width:700px){.detail-grid{grid-template-columns:1fr 1fr}}
+.detail-cell{padding:14px 20px;border-right:1px solid var(--border)}
+.detail-cell:last-child{border-right:none}
+.detail-cell .label{font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+.detail-cell .val{font-size:14px;font-weight:500;color:var(--text)}
+.detail-body{display:grid;grid-template-columns:1fr 1fr}
+@media(max-width:800px){.detail-body{grid-template-columns:1fr}}
+.detail-section{padding:20px 24px;border-right:1px solid var(--border)}
+.detail-section:last-child{border-right:none}
+.detail-section h3{font-size:13px;font-weight:600;color:var(--text2);margin-bottom:12px;text-transform:uppercase;letter-spacing:.5px}
+.wf-step{display:flex;gap:12px;align-items:flex-start;padding:10px 0;position:relative}
+.wf-step::before{content:'';position:absolute;left:14px;top:32px;bottom:-10px;width:1px;border-left:1px dashed var(--border2)}
+.wf-step:last-child::before{display:none}
+.wf-dot{width:28px;height:28px;border-radius:50%;border:1.5px solid;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;z-index:1;background:var(--bg2)}
+.wf-dot.done{border-color:var(--green);background:var(--green-bg);color:var(--green)}
+.wf-dot.active{border-color:var(--hot);background:var(--hot-bg);color:var(--hot)}
+.wf-dot.pending{border-color:var(--border2);color:var(--text3)}
+.wf-text .wf-title{font-size:13px;font-weight:500;color:var(--text)}
+.wf-text .wf-time{font-size:11px;color:var(--text3);margin-top:2px}
+.toast-container{position:fixed;bottom:20px;right:20px;display:flex;flex-direction:column;gap:8px;z-index:1000;pointer-events:none}
+.toast{background:var(--bg3);border:1px solid var(--border2);border-radius:var(--radius);padding:10px 14px;font-size:13px;color:var(--text);max-width:340px;animation:slideIn .2s ease;display:flex;align-items:flex-start;gap:8px;transition:opacity .3s}
+.toast.success{border-left:3px solid var(--green)}
+.toast.warning{border-left:3px solid var(--yellow)}
+.toast.info{border-left:3px solid var(--cold)}
+.toast.error{border-left:3px solid var(--hot)}
+@keyframes slideIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+.modal-overlay{position:fixed;inset:0;background:#000000bb;display:flex;align-items:center;justify-content:center;z-index:500;padding:20px}
+.modal{background:var(--bg2);border:1px solid var(--border2);border-radius:14px;width:100%;max-width:560px;overflow:hidden}
+.modal-header{padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.modal-header h3{font-size:16px;font-weight:600}
+.modal-close{background:none;border:none;color:var(--text3);cursor:pointer;font-size:20px;padding:0 4px;line-height:1}
+.modal-close:hover{color:var(--text)}
+.modal-body{padding:20px 22px}
+.modal-footer{padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px}
+.form-group{margin-bottom:14px}
+.form-group label{display:block;font-size:12px;font-weight:500;color:var(--text2);margin-bottom:6px}
+.form-group input,.form-group select,.form-group textarea{width:100%;padding:8px 10px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--radius-sm);color:var(--text);font-size:13px;outline:none}
+.form-group input:focus,.form-group select:focus,.form-group textarea:focus{border-color:var(--hot)}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.settings-section{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:16px;overflow:hidden}
+.settings-section h3{padding:14px 18px;font-size:13px;font-weight:600;border-bottom:1px solid var(--border);color:var(--text2);text-transform:uppercase;letter-spacing:.5px}
+.settings-row{display:flex;align-items:center;justify-content:space-between;padding:12px 18px;border-bottom:1px solid var(--border)}
+.settings-row:last-child{border-bottom:none}
+.settings-label{font-size:13px;color:var(--text)}
+.settings-sub{font-size:11px;color:var(--text3);margin-top:2px}
+.settings-input{padding:5px 8px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--radius-sm);color:var(--text);font-size:13px;outline:none}
+.toggle{position:relative;width:36px;height:20px;cursor:pointer}
+.toggle input{opacity:0;width:0;height:0;position:absolute}
+.toggle-slider{position:absolute;cursor:pointer;inset:0;background:var(--border2);border-radius:99px;transition:.2s}
+.toggle-slider::before{content:'';position:absolute;width:14px;height:14px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.2s}
+.toggle input:checked+.toggle-slider{background:var(--hot)}
+.toggle input:checked+.toggle-slider::before{transform:translateX(16px)}
+.template-card{background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;margin-bottom:8px}
+.priority{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.priority.high{background:var(--hot)}
+.priority.medium{background:var(--warm)}
+.priority.low{background:var(--cold)}
+.prog-bar{height:4px;background:var(--border);border-radius:99px;overflow:hidden;margin-top:6px}
+.prog-fill{height:100%;border-radius:99px}
+.prog-fill.hot{background:var(--hot)}.prog-fill.warm{background:var(--warm)}.prog-fill.cold{background:var(--cold)}
+.search-bar{position:relative;flex:1;max-width:260px}
+.search-bar input{width:100%;padding:7px 10px 7px 32px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:13px;outline:none}
+.search-icon{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text3);font-size:13px;pointer-events:none}
+.empty-state{text-align:center;padding:40px;color:var(--text3)}
+.empty-state .icon{font-size:32px;margin-bottom:10px}
+.loading{display:flex;align-items:center;justify-content:center;padding:40px;color:var(--text3);gap:10px}
+.spinner{width:18px;height:18px;border:2px solid var(--border2);border-top-color:var(--hot);border-radius:50%;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.auth-screen{display:flex;align-items:center;justify-content:center;min-height:100vh;background:var(--bg)}
+.auth-card{background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:36px;width:100%;max-width:400px}
+.auth-card h1{font-size:22px;font-weight:700;margin-bottom:4px}
+.auth-card h1 span{color:var(--hot)}
+/* Health status */
+.health-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;display:inline-block;margin-right:6px}
+.health-dot.ok{background:var(--green)}
+.health-dot.warning{background:var(--yellow)}
+.health-dot.error{background:var(--hot)}
+.health-row{display:flex;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px}
+.health-row:last-child{border-bottom:none}
+/* Cal sync badge */
+.cal-badge{font-size:9px;padding:1px 5px;border-radius:99px;font-weight:700;margin-left:6px}
+.cal-badge.synced{background:var(--green-bg);color:var(--green)}
+.cal-badge.failed{background:var(--hot-bg);color:var(--hot)}
+.cal-badge.pending{background:var(--yellow-bg);color:var(--yellow)}
+</style>
+</head>
+<body>
+
+<!-- AUTH -->
+<div class="auth-screen" id="auth-screen" style="display:none">
+  <div class="auth-card">
+    <h1>⚡ Follow<span>Up</span> Engine</h1>
+    <p style="font-size:13px;color:var(--text3);margin-bottom:24px">Sign in to continue</p>
+    <div class="form-group"><label>Email</label><input type="email" id="auth-email" placeholder="you@email.com"></div>
+    <div class="form-group"><label>Password</label><input type="password" id="auth-password" placeholder="••••••••" onkeydown="if(event.key==='Enter')signIn()"></div>
+    <div style="display:flex;gap:8px;margin-top:4px">
+      <button class="btn btn-primary" style="flex:1" onclick="signIn()">Sign In</button>
+      <button class="btn" style="flex:1" onclick="signUp()">Create Account</button>
+    </div>
+    <div id="auth-error" style="font-size:12px;color:var(--hot);margin-top:10px;text-align:center;min-height:18px"></div>
+    <div style="font-size:11px;color:var(--text3);margin-top:8px;text-align:center;line-height:1.5">
+      First time? Create account → confirm email → sign in.
+    </div>
+  </div>
+</div>
+
+<!-- APP -->
+<div class="app" id="app" style="display:none">
+  <div class="sidebar">
+    <div class="sidebar-logo">⚡ Follow<span>Up</span></div>
+    <div class="nav-section">Overview</div>
+    <div class="nav-item active" id="nav-dashboard" onclick="showView('dashboard',this)"><span class="icon">📊</span> Dashboard <span class="nav-badge" id="dash-badge">0</span></div>
+    <div class="nav-item" id="nav-leads" onclick="showView('leads',this)"><span class="icon">👥</span> All Leads</div>
+    <div class="nav-section">Actions</div>
+    <div class="nav-item" id="nav-tasks" onclick="showView('tasks',this)"><span class="icon">✅</span> Tasks</div>
+    <div class="nav-item" id="nav-calendar" onclick="showView('calendar',this)"><span class="icon">📅</span> Calendar</div>
+    <div class="nav-section">Config</div>
+    <div class="nav-item" id="nav-settings" onclick="showView('settings',this)"><span class="icon">⚙️</span> Workflows</div>
+    <div class="nav-item" id="nav-health" onclick="showView('health',this)"><span class="icon">🩺</span> Health</div>
+    <div class="sidebar-footer" id="user-footer"></div>
+  </div>
+  <div class="main" id="main-content"></div>
+</div>
+
+<div class="toast-container" id="toast-container"></div>
+<div class="modal-overlay" id="modal" style="display:none" onclick="if(event.target===this)closeModal()">
+  <div class="modal" id="modal-inner"></div>
+</div>
+
+<script>
+// ── CONFIG ────────────────────────────────────────────────────
+// Only public-safe values here. NO secrets.
+const SUPABASE_URL  = 'https://mcsmiqkjyidtlwmomjoq.supabase.co';
+const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1jc21pcWtqeWlkdGx3bW9tam9xIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYyMTg2MDEsImV4cCI6MjA5MTc5NDYwMX0.RDk5Y5SMCaknNUayfhZcNFh5m8ElRLFNrs8xaoGW4qw';
+const FN = (name) => `${SUPABASE_URL}/functions/v1/${name}`;
+
+const { createClient } = supabase;
+const sb = createClient(SUPABASE_URL, SUPABASE_ANON);
+
+// ── STATE ─────────────────────────────────────────────────────
+let currentView  = 'dashboard';
+let selectedLead = null;
+let currentUser  = null;
+let allLeads     = [];
+let allTasks     = [];
+let workflowCfg  = {};
+let realtimeSub  = null;
+let pollingTimer = null;
+let processingOutcome = false;
+
+// ── AUTH ──────────────────────────────────────────────────────
+async function initApp() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (session?.user) { currentUser = session.user; await showApp(); }
+  else showAuthScreen();
+
+  sb.auth.onAuthStateChange(async (event, session) => {
+    if (event === 'SIGNED_IN' && session?.user) {
+      currentUser = session.user;
+      await showApp();
+    } else if (event === 'SIGNED_OUT') {
+      currentUser = null;
+      clearInterval(pollingTimer);
+      showAuthScreen();
+    }
+  });
+}
+
+async function signIn() {
+  const email = document.getElementById('auth-email').value?.trim();
+  const pass  = document.getElementById('auth-password').value;
+  if (!email || !pass) { setAuthError('Email and password required'); return; }
+  try {
+    const { error } = await sb.auth.signInWithPassword({ email, password: pass });
+    if (error) setAuthError(error.message);
+  } catch(e) { setAuthError('Connection error — check your internet and try again.'); }
+}
+
+async function signUp() {
+  const email = document.getElementById('auth-email').value?.trim();
+  const pass  = document.getElementById('auth-password').value;
+  if (!email || !pass) { setAuthError('Email and password required'); return; }
+  if (pass.length < 6) { setAuthError('Password must be at least 6 characters'); return; }
+  try {
+    const { data, error } = await sb.auth.signUp({ email, password: pass, options: { emailRedirectTo: window.location.href } });
+    if (error) setAuthError(error.message);
+    else if (data?.user?.identities?.length === 0) setAuthError('Account exists — click Sign In.', false);
+    else setAuthError('Check your email, click the confirmation link, then Sign In here.', false);
+  } catch(e) { setAuthError('Connection error — check your internet and try again.'); }
+}
+
+function setAuthError(msg, isError=true) {
+  const el = document.getElementById('auth-error');
+  el.textContent = msg;
+  el.style.color = isError ? 'var(--hot)' : 'var(--green)';
+}
+
+async function signOut() {
+  await sb.auth.signOut();
+}
+
+function showAuthScreen() {
+  document.getElementById('auth-screen').style.display = 'flex';
+  document.getElementById('app').style.display = 'none';
+}
+
+async function showApp() {
+  document.getElementById('auth-screen').style.display = 'none';
+  document.getElementById('app').style.display = 'flex';
+  document.getElementById('user-footer').innerHTML =
+    `<div style="color:var(--text2);word-break:break-all">${currentUser.email}</div>
+     <div onclick="signOut()" style="cursor:pointer;color:var(--hot);margin-top:4px">Sign out</div>`;
+  await loadData();
+  setupRealtime();
+  startPolling();
+  render();
+}
+
+// ── DATA LOADING ──────────────────────────────────────────────
+async function loadData() {
+  await Promise.all([loadLeads(), loadTasks(), loadWorkflowConfig()]);
+  updateBadge();
+}
+
+async function loadLeads() {
+  const { data, error } = await sb
+    .from('leads').select('*')
+    .eq('user_id', currentUser.id)
+    .order('created_at', { ascending: false });
+  if (!error) allLeads = data || [];
+  else showToast('Failed to load leads: ' + error.message, 'error');
+}
+
+async function loadTasks() {
+  const now = new Date();
+  const { data, error } = await sb
+    .from('tasks').select('*')
+    .eq('user_id', currentUser.id)
+    .neq('status', 'cancelled')
+    .order('due_at', { ascending: true });
+  if (!error) {
+    allTasks = (data || []).map(t => ({
+      ...t, overdue: t.status === 'pending' && new Date(t.due_at) < now
+    }));
+  } else showToast('Failed to load tasks: ' + error.message, 'error');
+}
+
+async function loadActivities(leadId) {
+  const { data } = await sb
+    .from('activities').select('*')
+    .eq('lead_id', leadId)
+    .order('created_at', { ascending: true });
+  return data || [];
+}
+
+async function loadWorkflowConfig() {
+  const { data } = await sb
+    .from('workflow_configs').select('*')
+    .eq('user_id', currentUser.id).single();
+  if (data) workflowCfg = data;
+}
+
+// ── REALTIME ──────────────────────────────────────────────────
+function setupRealtime() {
+  if (realtimeSub) sb.removeChannel(realtimeSub);
+  realtimeSub = sb.channel('db-changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'leads', filter: `user_id=eq.${currentUser.id}` },
+      () => loadLeads().then(() => { updateBadge(); if (!processingOutcome) render(); }))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks', filter: `user_id=eq.${currentUser.id}` },
+      () => loadTasks().then(() => { updateBadge(); if (!processingOutcome) render(); }))
+    .subscribe();
+}
+
+function startPolling() {
+  clearInterval(pollingTimer);
+  pollingTimer = setInterval(async () => {
+    await loadTasks();
+    updateBadge();
+    checkInAppAlerts();
+    if (!selectedLead && !processingOutcome) render();
+  }, 60000);
+}
+
+function checkInAppAlerts() {
+  const now = new Date();
+  const fiveMinAgo = new Date(now - 5 * 60 * 1000);
+  allTasks.filter(t => {
+    const due = new Date(t.due_at);
+    return t.status === 'pending' && due <= now && due > fiveMinAgo;
+  }).forEach(t => showToast(`⚡ Due Now: ${t.action_type.toUpperCase()} ${t.lead_name}`, 'warning'));
+}
+
+// ── API CALL (Edge Functions only — no fallback) ──────────────
+async function callFn(name, body) {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) throw new Error('Not authenticated');
+
+  const res = await fetch(FN(name), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify(body),
+  });
+
+  const data = await res.json();
+
+  if (!res.ok || !data.success) {
+    throw new Error(data.error || `Function ${name} failed (${res.status})`);
+  }
+
+  // Show warnings as non-blocking toasts
+  if (data.data?.warnings?.length) {
+    data.data.warnings.forEach(w => showToast(`⚠ ${w}`, 'warning'));
+  }
+
+  return data.data;
+}
+
+// ── OUTCOME PROCESSING ─────────────────────────────────────────
+// NO fallback. Backend is the single source of truth.
+async function processOutcome(leadId, taskId, outcome) {
+  if (processingOutcome) return;
+  processingOutcome = true;
+
+  // Disable all outcome buttons
+  document.querySelectorAll('.outcome-btn').forEach(b => b.disabled = true);
+  showToast('Processing...', 'info');
+
+  try {
+    const result = await callFn('process-outcomes', {
+      lead_id: leadId,
+      task_id: taskId || null,
+      outcome,
+    });
+
+    const msgs = {
+      workflow_paused:    '✓ Lead answered — workflow paused',
+      retry_scheduled:    `No answer logged — next call scheduled`,
+      downgraded_to_warm: `Lead downgraded to WARM — warm workflow started`,
+      lead_inactive:      'Lead marked inactive — all tasks stopped',
+    };
+
+    const type = outcome === 'answered' ? 'success'
+      : outcome === 'notinterested' ? 'warning' : 'info';
+
+    showToast(msgs[result.action] || 'Outcome logged', type);
+
+    if (outcome === 'answered') openAnsweredModal(leadId);
+
+    await loadData();
+    if (selectedLead?.id === leadId) {
+      selectedLead = allLeads.find(l => l.id === leadId) || null;
+    }
+    render();
+
+  } catch (e) {
+    showToast(`Error: ${e.message}`, 'error');
+    console.error('processOutcome failed:', e);
+    // Re-enable buttons on failure so user can retry
+    document.querySelectorAll('.outcome-btn').forEach(b => b.disabled = false);
+  } finally {
+    processingOutcome = false;
+  }
+}
+
+async function quickOutcome(leadId, outcome) {
+  const task = allTasks.find(t => t.lead_id === leadId && t.status === 'pending');
+  await processOutcome(leadId, task?.id || null, outcome);
+}
+
+async function logOutcomeTask(taskId, leadId, outcome) {
+  await processOutcome(leadId, taskId, outcome);
+}
+
+// ── UTILITIES ─────────────────────────────────────────────────
+function initials(name) { return (name||'?').split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase(); }
+
+function fmtTime(iso) {
+  if (!iso) return 'Never';
+  const d = new Date(iso), now = new Date(), diff = now - d;
+  if (diff < 60000)    return 'Just now';
+  if (diff < 3600000)  return `${Math.floor(diff/60000)}m ago`;
+  if (diff < 86400000) return `${Math.floor(diff/3600000)}h ago`;
+  const days = Math.floor(diff/86400000);
+  if (days < 7) return `${days}d ago`;
+  return d.toLocaleDateString();
+}
+
+function fmtDue(iso) {
+  if (!iso) return 'N/A';
+  const d = new Date(iso), now = new Date(), diff = d - now;
+  if (diff < 0) {
+    const overMin = Math.floor(-diff/60000);
+    return overMin < 60 ? `Overdue ${overMin}m` : `Overdue ${Math.floor(overMin/60)}h`;
+  }
+  if (diff < 3600000)  return `In ${Math.floor(diff/60000)}m`;
+  if (diff < 86400000) return `Today ${d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;
+  const days = Math.ceil(diff/86400000);
+  return days < 7 ? `In ${days}d` : d.toLocaleDateString();
+}
+
+function updateBadge() {
+  document.getElementById('dash-badge').textContent =
+    allTasks.filter(t => t.status === 'pending').length;
+}
+
+function showToast(msg, type='info') {
+  const tc = document.getElementById('toast-container');
+  const t  = document.createElement('div');
+  t.className = `toast ${type}`;
+  const icon = {success:'✓',warning:'⚠',info:'ℹ',error:'✕'}[type]||'ℹ';
+  t.innerHTML = `<span style="font-weight:700;flex-shrink:0">${icon}</span><span style="line-height:1.4">${msg}</span>`;
+  tc.appendChild(t);
+  setTimeout(() => t.style.opacity = '0', 4000);
+  setTimeout(() => t.remove(), 4500);
+}
+
+function openModal(html) {
+  document.getElementById('modal-inner').innerHTML = html;
+  document.getElementById('modal').style.display = 'flex';
+}
+function closeModal() { document.getElementById('modal').style.display = 'none'; }
+
+// ── NAVIGATION ────────────────────────────────────────────────
+function showView(v, el) {
+  currentView = v; selectedLead = null;
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  (el || document.getElementById('nav-'+v))?.classList.add('active');
+  render();
+}
+
+function render() {
+  const main = document.getElementById('main-content');
+  if (!main) return;
+  if (selectedLead) {
+    renderLeadDetail(main).catch(e => {
+      main.innerHTML = `<div class="content"><div style="color:var(--hot);padding:40px">Error: ${e.message}</div></div>`;
+    });
+    return;
+  }
+  if (currentView === 'health') { renderHealth(main).catch(console.error); return; }
+  const views = {dashboard:renderDashboard, leads:renderLeads, tasks:renderTasksView, calendar:renderCalendar, settings:renderSettings};
+  (views[currentView] || renderDashboard)(main);
+}
+
+// ── DASHBOARD ─────────────────────────────────────────────────
+function renderDashboard(main) {
+  const hot  = allLeads.filter(l=>l.status==='hot').length;
+  const warm = allLeads.filter(l=>l.status==='warm').length;
+  const cold = allLeads.filter(l=>l.status==='cold').length;
+  const od   = allTasks.filter(t=>t.overdue&&t.status==='pending').length;
+  const pend = allTasks.filter(t=>t.status==='pending');
+
+  main.innerHTML = `
+  <div class="topbar">
+    <div class="topbar-title">Today's Execution Board</div>
+    <button class="btn btn-primary" onclick="openAddLead()">+ Add Lead</button>
+  </div>
+  <div class="content">
+    <div class="stat-grid">
+      <div class="stat-card hot"><div class="stat-label">🔥 Hot</div><div class="stat-val">${hot}</div><div class="stat-sub">Act now</div></div>
+      <div class="stat-card warm"><div class="stat-label">🌡 Warm</div><div class="stat-val">${warm}</div><div class="stat-sub">In sequence</div></div>
+      <div class="stat-card cold"><div class="stat-label">❄️ Cold</div><div class="stat-val">${cold}</div><div class="stat-sub">Nurture</div></div>
+      <div class="stat-card overdue"><div class="stat-label">⏰ Overdue</div><div class="stat-val">${od}</div><div class="stat-sub">Needs action</div></div>
+    </div>
+    <div class="section-header"><div class="section-title">🔥 Hot Leads — Act Now</div><div class="section-count">${hot}</div></div>
+    <div class="tasks-grid">${allLeads.filter(l=>l.status==='hot').map(renderHotCard).join('') ||
+      '<div class="empty-state"><div class="icon">🎉</div><p>No hot leads</p></div>'}</div>
+    <div class="section-header"><div class="section-title">📋 Today's Tasks</div><div class="section-count">${pend.length} pending · ${od} overdue</div></div>
+    <div class="tasks-grid">${pend.map(renderTaskCard).join('') ||
+      '<div class="empty-state"><div class="icon">✅</div><p>All done!</p></div>'}</div>
+  </div>`;
+}
+
+function renderHotCard(l) {
+  const max  = workflowCfg.hot_max_attempts || 6;
+  const dots = Array.from({length:max},(_,i)=>
+    `<div class="attempt-dot ${i<(l.call_attempts||0)?'done':'empty'}"></div>`).join('');
+  return `
+  <div class="task-card hot" onclick="openLeadDetail('${l.id}')" style="cursor:pointer">
+    <div class="task-top">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div class="avatar hot">${initials(l.name)}</div>
+        <div><div class="task-name">${l.name}</div>
+          <div style="font-size:11px;color:var(--text3)">${l.lead_type||'Lead'} · ${l.phone}</div></div>
+      </div>
+      <div class="task-type call">📞 Call</div>
+    </div>
+    <div class="task-meta"><span>Next: <strong style="color:var(--text)">${l.next_action_label||'Call Now'}</strong></span></div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <span style="font-size:11px;color:var(--text3)">Attempts:</span>
+      <div class="task-attempts">${dots}</div>
+      <span style="font-size:11px;color:var(--text3)">${l.call_attempts||0}/${max}</span>
+    </div>
+    <div class="task-actions" onclick="event.stopPropagation()">
+      <button class="outcome-btn answered" onclick="quickOutcome('${l.id}','answered')">✓ Answered</button>
+      <button class="outcome-btn noanswer" onclick="quickOutcome('${l.id}','noanswer')">No Answer</button>
+      <button class="outcome-btn" onclick="quickOutcome('${l.id}','voicemail')">Voicemail</button>
+      <button class="outcome-btn notint" onclick="quickOutcome('${l.id}','notinterested')">Not Interested</button>
+    </div>
+  </div>`;
+}
+
+function renderTaskCard(task) {
+  const lead = allLeads.find(l=>l.id===task.lead_id);
+  const s    = lead?.status||'warm';
+  const icons = {call:'📞',sms:'💬',email:'✉️'};
+  const done  = task.status==='completed';
+  const calBadge = task.external_event_id
+    ? `<span class="cal-badge synced">📅</span>`
+    : task.calendar_sync_status === 'failed'
+      ? `<span class="cal-badge failed">📅✕</span>` : '';
+  return `
+  <div class="task-card ${s} ${task.overdue?'overdue':''}" style="${done?'opacity:.55':''}">
+    <div class="task-top">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div class="priority ${task.priority}"></div>
+        <div class="avatar ${s}">${initials(task.lead_name)}</div>
+        <div><div class="task-name">${task.lead_name}${calBadge}</div>
+          <div style="font-size:11px;color:var(--text3)">Due: ${fmtDue(task.due_at)}</div></div>
+      </div>
+      <div class="task-type ${task.action_type}">${icons[task.action_type]||'📋'} ${task.action_type[0].toUpperCase()+task.action_type.slice(1)}</div>
+    </div>
+    ${done ? `<div style="font-size:12px;color:var(--green);margin-top:4px">✓ Completed · ${task.outcome||''}</div>` : `
+    <div class="task-actions">
+      <button class="outcome-btn answered" onclick="logOutcomeTask('${task.id}','${task.lead_id}','answered')">✓ Done</button>
+      <button class="outcome-btn noanswer" onclick="logOutcomeTask('${task.id}','${task.lead_id}','noanswer')">No Answer</button>
+      ${task.action_type==='call'?`<button class="outcome-btn" onclick="logOutcomeTask('${task.id}','${task.lead_id}','voicemail')">Voicemail</button>`:''}
+      <button class="outcome-btn notint" onclick="logOutcomeTask('${task.id}','${task.lead_id}','notinterested')">Not Interested</button>
+    </div>`}
+  </div>`;
+}
+
+// ── LEADS VIEW ────────────────────────────────────────────────
+function renderLeads(main) {
+  main.innerHTML = `
+  <div class="topbar">
+    <div class="topbar-title">All Leads</div>
+    <div class="search-bar"><span class="search-icon">🔍</span>
+      <input type="text" placeholder="Search leads..." oninput="filterLeads(this.value)"></div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      <button class="btn btn-sm" onclick="filterByStatus('all')">All</button>
+      <button class="btn btn-sm" style="color:var(--hot)" onclick="filterByStatus('hot')">🔥 Hot</button>
+      <button class="btn btn-sm" style="color:var(--warm)" onclick="filterByStatus('warm')">🌡 Warm</button>
+      <button class="btn btn-sm" style="color:var(--cold)" onclick="filterByStatus('cold')">❄️ Cold</button>
+    </div>
+    <button class="btn btn-primary" onclick="openAddLead()">+ Add Lead</button>
+  </div>
+  <div class="content">
+    <div class="leads-table" id="leads-table">${buildLeadsTable(allLeads)}</div>
+  </div>`;
+}
+
+function buildLeadsTable(data) {
+  if (!data.length) return '<div class="empty-state"><div class="icon">👥</div><p>No leads yet — add your first lead</p></div>';
+  return `<div class="table-header"><div>Lead</div><div>Status</div><div>Score</div><div>Attempts</div><div>Last Contact</div><div>Next Action</div></div>
+  ${data.map(l=>`
+  <div class="table-row" onclick="openLeadDetail('${l.id}')">
+    <div class="lead-name-col"><div class="avatar ${l.status}">${initials(l.name)}</div>
+      <div class="lead-info"><div class="name">${l.name}</div><div class="phone">${l.phone}</div></div></div>
+    <div><span class="status-badge ${l.status}">${l.status.toUpperCase()}</span></div>
+    <div><div style="font-size:13px;font-weight:600;color:var(--text)">${l.score}</div>
+      <div class="prog-bar"><div class="prog-fill ${l.status}" style="width:${l.score}%"></div></div></div>
+    <div style="font-size:13px;color:var(--text2)">${l.call_attempts||0}📞 ${l.sms_sent||0}💬 ${l.emails_sent||0}✉️</div>
+    <div style="font-size:12px;color:var(--text3)">${fmtTime(l.last_contact_at)}</div>
+    <div><span class="next-action">${l.next_action_label||'—'}</span></div>
+  </div>`).join('')}`;
+}
+
+let _filterStatus = 'all';
+function filterByStatus(s) { _filterStatus = s; document.getElementById('leads-table').innerHTML = buildLeadsTable(s==='all'?allLeads:allLeads.filter(l=>l.status===s)); }
+function filterLeads(q) { const base=_filterStatus==='all'?allLeads:allLeads.filter(l=>l.status===_filterStatus); document.getElementById('leads-table').innerHTML = buildLeadsTable(base.filter(l=>l.name.toLowerCase().includes(q.toLowerCase())||l.phone.includes(q))); }
+
+// ── TASKS VIEW ────────────────────────────────────────────────
+function renderTasksView(main) {
+  const pend = allTasks.filter(t=>t.status==='pending');
+  const done = allTasks.filter(t=>t.status==='completed');
+  const od   = pend.filter(t=>t.overdue);
+  main.innerHTML = `
+  <div class="topbar"><div class="topbar-title">Task Queue</div>
+    <div style="font-size:13px;color:var(--text3)">${pend.length} pending · ${done.length} completed</div>
+    <button class="btn btn-sm" onclick="loadTasks().then(render)">🔄 Refresh</button></div>
+  <div class="content">
+    <div class="section-header"><div class="section-title">⏰ Overdue</div><div class="section-count">${od.length}</div></div>
+    <div class="tasks-grid">${od.map(renderTaskCard).join('')||'<div class="empty-state"><div class="icon">✅</div><p>No overdue tasks</p></div>'}</div>
+    <div class="section-header" style="margin-top:8px"><div class="section-title">📋 Pending</div></div>
+    <div class="tasks-grid">${pend.filter(t=>!t.overdue).map(renderTaskCard).join('')||'<div class="empty-state"><div class="icon">🎉</div><p>All caught up!</p></div>'}</div>
+    <div class="section-header" style="margin-top:8px"><div class="section-title">✅ Completed</div></div>
+    <div class="tasks-grid">${done.slice(0,10).map(renderTaskCard).join('')||'<div class="empty-state"><div class="icon">📋</div><p>None yet</p></div>'}</div>
+  </div>`;
+}
+
+// ── CALENDAR ──────────────────────────────────────────────────
+function renderCalendar(main) {
+  const now = new Date(), year = now.getFullYear(), month = now.getMonth();
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month+1, 0).getDate();
+  const monthName = now.toLocaleString('default',{month:'long'});
+  const tasksByDay = {};
+  allTasks.filter(t=>t.status==='pending').forEach(t=>{
+    const d = new Date(t.due_at);
+    if (d.getMonth()===month && d.getFullYear()===year) {
+      if (!tasksByDay[d.getDate()]) tasksByDay[d.getDate()]=[];
+      tasksByDay[d.getDate()].push(t);
+    }
+  });
+  const upcoming = allTasks.filter(t=>t.status==='pending'&&new Date(t.due_at)>=now).sort((a,b)=>new Date(a.due_at)-new Date(b.due_at)).slice(0,10);
+
+  main.innerHTML = `
+  <div class="topbar"><div class="topbar-title">📅 ${monthName} ${year}</div>
+    <div style="font-size:13px;color:var(--text3)">Calendar sync via Google Calendar API</div></div>
+  <div class="content">
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-bottom:20px">
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);border-bottom:1px solid var(--border)">
+        ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d=>`<div style="padding:10px;text-align:center;font-size:11px;font-weight:600;color:var(--text3)">${d}</div>`).join('')}
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr)">
+        ${Array.from({length:firstDay},()=>`<div style="padding:8px;min-height:70px;border-right:1px solid var(--border);border-bottom:1px solid var(--border)"></div>`).join('')}
+        ${Array.from({length:daysInMonth},(_,i)=>{
+          const day=i+1, isToday=day===now.getDate(), ev=tasksByDay[day]||[];
+          return `<div style="padding:8px;min-height:70px;border-right:1px solid var(--border);border-bottom:1px solid var(--border);${isToday?'background:var(--bg3)':''}">
+            <div style="font-size:12px;font-weight:${isToday?'700':'400'};color:${isToday?'var(--hot)':'var(--text3)'};margin-bottom:4px">${day}</div>
+            ${ev.slice(0,2).map(t=>{const l=allLeads.find(l=>l.id===t.lead_id);return`<div style="font-size:9px;padding:2px 4px;border-radius:3px;margin-bottom:2px;background:var(--${l?.status||'warm'}-bg);color:var(--${l?.status||'warm'});overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${new Date(t.due_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})} ${t.lead_name.split(' ')[0]}</div>`}).join('')}
+            ${ev.length>2?`<div style="font-size:9px;color:var(--text3)">+${ev.length-2}</div>`:''}
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+    <div class="section-header"><div class="section-title">Upcoming Tasks</div></div>
+    ${upcoming.map(t=>{const l=allLeads.find(x=>x.id===t.lead_id),s=l?.status||'warm';const icons={call:'📞',sms:'💬',email:'✉️'};
+      return `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 16px;margin-bottom:8px;display:flex;align-items:center;gap:12px">
+        <div style="width:40px;height:40px;border-radius:var(--radius-sm);background:var(--${s}-bg);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">${icons[t.action_type]}</div>
+        <div style="flex:1"><div style="font-size:13px;font-weight:500;color:var(--text)">${t.action_type.toUpperCase()}: ${t.lead_name}</div>
+          <div style="font-size:11px;color:var(--text3)">${fmtDue(t.due_at)} · ${l?.phone||''} ${t.external_event_id?'· <span style="color:var(--green);font-size:10px">📅 Cal synced</span>':''}</div></div>
+        <span class="status-badge ${s}">${s.toUpperCase()}</span>
+        ${t.overdue?`<span style="font-size:9px;color:var(--yellow);font-weight:700">OVERDUE</span>`:''}
+      </div>`;
+    }).join('')||'<div class="empty-state"><div class="icon">📅</div><p>No upcoming tasks</p></div>'}
+  </div>`;
+}
+
+// ── HEALTH CHECK VIEW ─────────────────────────────────────────
+async function renderHealth(main) {
+  main.innerHTML = `
+  <div class="topbar"><div class="topbar-title">🩺 System Health</div>
+    <button class="btn btn-sm" onclick="renderHealth(document.getElementById('main-content'))">🔄 Recheck</button></div>
+  <div class="content"><div class="loading"><div class="spinner"></div> Running health checks...</div></div>`;
+
+  try {
+    const result = await callFn('health-check', {});
+    const statusColor = result.overall === 'healthy' ? 'var(--green)' : result.overall === 'partial' ? 'var(--yellow)' : 'var(--hot)';
+    const checks = result.checks;
+
+    main.innerHTML = `
+    <div class="topbar"><div class="topbar-title">🩺 System Health</div>
+      <button class="btn btn-sm" onclick="renderHealth(document.getElementById('main-content'))">🔄 Recheck</button></div>
+    <div class="content">
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:16px 20px;margin-bottom:16px;display:flex;align-items:center;gap:12px">
+        <div style="width:14px;height:14px;border-radius:50%;background:${statusColor};flex-shrink:0"></div>
+        <div><div style="font-size:15px;font-weight:600;color:${statusColor}">${result.overall.toUpperCase()}</div>
+          <div style="font-size:11px;color:var(--text3)">Checked ${new Date(result.checked_at).toLocaleTimeString()}</div></div>
+      </div>
+      <div class="settings-section">
+        <h3>System Checks</h3>
+        <div style="padding:8px 18px">
+          ${Object.entries(checks).map(([key, v])=>`
+          <div class="health-row">
+            <span class="health-dot ${v.status}"></span>
+            <span style="font-weight:500;min-width:160px;color:var(--text)">${key.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase())}</span>
+            <span style="color:var(--text3);font-size:12px">${v.detail}</span>
+          </div>`).join('')}
+        </div>
+      </div>
+      <div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 16px;font-size:12px;color:var(--text3)">
+        <strong style="color:var(--text2)">Note:</strong> SMS, email, and calendar integrations require server-side environment variables set in Supabase Edge Function secrets. They cannot be configured from the browser for security reasons.
+      </div>
+    </div>`;
+  } catch (e) {
+    main.innerHTML = `
+    <div class="topbar"><div class="topbar-title">🩺 System Health</div>
+      <button class="btn btn-sm" onclick="renderHealth(document.getElementById('main-content'))">🔄 Recheck</button></div>
+    <div class="content">
+      <div style="background:var(--hot-bg);border:1px solid var(--hot)30;border-radius:var(--radius);padding:16px 20px;color:var(--hot)">
+        <strong>Health check failed:</strong> ${e.message}<br>
+        <span style="font-size:12px;opacity:.8">Edge Functions may not be deployed yet. Deploy them via Supabase CLI.</span>
+      </div>
+    </div>`;
+  }
+}
+
+// ── SETTINGS ─────────────────────────────────────────────────
+function renderSettings(main) {
+  const c = workflowCfg;
+  main.innerHTML = `
+  <div class="topbar"><div class="topbar-title">⚙️ Workflow Configuration</div>
+    <button class="btn btn-primary" onclick="saveSettings()">Save Changes</button></div>
+  <div class="content">
+    <div style="background:#38bdf810;border:1px solid #38bdf840;border-radius:var(--radius-sm);padding:10px 14px;font-size:12px;color:var(--cold);margin-bottom:16px">
+      🔒 API keys (Twilio, SendGrid, Google) are stored securely as Edge Function environment secrets — not here. Contact your admin to configure them.
+    </div>
+    <div class="settings-section">
+      <h3>📣 Notification Targets</h3>
+      <div class="settings-row"><div><div class="settings-label">Your phone (for SMS alerts)</div><div class="settings-sub">Receive task reminders via SMS</div></div>
+        <input class="settings-input" id="s-notifphone" style="width:160px" type="tel" value="${c.notification_phone||''}" placeholder="+15025550200"></div>
+      <div class="settings-row"><div><div class="settings-label">Your email (for email alerts)</div><div class="settings-sub">Receive overdue task notifications</div></div>
+        <input class="settings-input" id="s-notifmail" style="width:200px" type="email" value="${c.notification_email||''}" placeholder="you@email.com"></div>
+    </div>
+    <div class="settings-section">
+      <h3>🔗 Integration Toggles</h3>
+      <div class="settings-row"><div><div class="settings-label">Twilio SMS</div><div class="settings-sub">Enable auto-SMS (requires server config)</div></div>
+        <label class="toggle"><input type="checkbox" id="s-twilio" ${c.twilio_enabled?'checked':''}><span class="toggle-slider"></span></label></div>
+      <div class="settings-row"><div><div class="settings-label">Email notifications</div><div class="settings-sub">Enable email alerts (requires server config)</div></div>
+        <label class="toggle"><input type="checkbox" id="s-email" ${c.email_enabled?'checked':''}><span class="toggle-slider"></span></label></div>
+      <div class="settings-row"><div><div class="settings-label">Google Calendar</div><div class="settings-sub">Sync tasks to calendar (requires server config)</div></div>
+        <label class="toggle"><input type="checkbox" id="s-gcal" ${c.gcal_enabled?'checked':''}><span class="toggle-slider"></span></label></div>
+    </div>
+    <div class="settings-section">
+      <h3>🔥 Hot Lead Workflow</h3>
+      <div class="settings-row"><div><div class="settings-label">Retry interval (hours)</div></div>
+        <input class="settings-input" id="s-retry" type="number" value="${c.hot_retry_hours||3}" min="1" max="8" style="width:80px"></div>
+      <div class="settings-row"><div><div class="settings-label">Max attempts before downgrade</div></div>
+        <input class="settings-input" id="s-maxatt" type="number" value="${c.hot_max_attempts||6}" min="3" max="12" style="width:80px"></div>
+      <div class="settings-row"><div><div class="settings-label">Auto-send SMS on no answer</div></div>
+        <label class="toggle"><input type="checkbox" id="s-autosms" ${c.hot_auto_sms?'checked':''}><span class="toggle-slider"></span></label></div>
+    </div>
+    <div class="settings-section">
+      <h3>🌡 Warm / ❄️ Cold Workflow Timing</h3>
+      <div class="settings-row"><div><div class="settings-label">Warm Day 1</div></div><select class="settings-input" id="s-w1" style="width:110px">${['call','sms','email'].map(v=>`<option value="${v}"${c.warm_day1_action===v?' selected':''}>${v}</option>`).join('')}</select></div>
+      <div class="settings-row"><div><div class="settings-label">Warm Day 3</div></div><select class="settings-input" id="s-w3" style="width:110px">${['call','sms','email'].map(v=>`<option value="${v}"${c.warm_day3_action===v?' selected':''}>${v}</option>`).join('')}</select></div>
+      <div class="settings-row"><div><div class="settings-label">Warm Day 7</div></div><select class="settings-input" id="s-w7" style="width:110px">${['call','sms','email'].map(v=>`<option value="${v}"${c.warm_day7_action===v?' selected':''}>${v}</option>`).join('')}</select></div>
+      <div class="settings-row"><div><div class="settings-label">Warm Day 14</div></div><select class="settings-input" id="s-w14" style="width:110px">${['call','sms','email'].map(v=>`<option value="${v}"${c.warm_day14_action===v?' selected':''}>${v}</option>`).join('')}</select></div>
+      <div class="settings-row"><div><div class="settings-label">Cold Day 7</div></div><select class="settings-input" id="s-c7" style="width:110px">${['call','sms','email'].map(v=>`<option value="${v}"${c.cold_day7_action===v?' selected':''}>${v}</option>`).join('')}</select></div>
+      <div class="settings-row"><div><div class="settings-label">Cold Day 30</div></div><select class="settings-input" id="s-c30" style="width:110px">${['call','sms','email'].map(v=>`<option value="${v}"${c.cold_day30_action===v?' selected':''}>${v}</option>`).join('')}</select></div>
+    </div>
+    <div class="settings-section">
+      <h3>💬 Message Templates</h3>
+      <div style="padding:14px 18px">
+        <div class="template-card"><div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:6px">📞 Missed Call SMS</div>
+          <textarea id="s-tmpl-missed" style="width:100%;background:var(--bg);border:1px solid var(--border2);border-radius:4px;color:var(--text);font-size:12px;padding:8px;resize:vertical;min-height:52px">${c.sms_missed_call_template||'Hey {name}, I just tried calling you about your inquiry. When is a good time to reach you?'}</textarea></div>
+        <div class="template-card"><div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:6px">🌡 Warm Follow-Up</div>
+          <textarea id="s-tmpl-warm" style="width:100%;background:var(--bg);border:1px solid var(--border2);border-radius:4px;color:var(--text);font-size:12px;padding:8px;resize:vertical;min-height:52px">${c.sms_warm_followup||'Hi {name}, following up on your inquiry. Worth a quick chat?'}</textarea></div>
+        <div class="template-card"><div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:6px">❄️ Re-Engagement</div>
+          <textarea id="s-tmpl-cold" style="width:100%;background:var(--bg);border:1px solid var(--border2);border-radius:4px;color:var(--text);font-size:12px;padding:8px;resize:vertical;min-height:52px">${c.sms_cold_reengage||'Hi {name}, still looking? I have new options that might interest you.'}</textarea></div>
+      </div>
+    </div>
+  </div>`;
+}
+
+async function saveSettings() {
+  const g = id => document.getElementById(id);
+  const payload = {
+    notification_phone:        g('s-notifphone')?.value||'',
+    notification_email:        g('s-notifmail')?.value||'',
+    twilio_enabled:            g('s-twilio')?.checked||false,
+    email_enabled:             g('s-email')?.checked||false,
+    gcal_enabled:              g('s-gcal')?.checked||false,
+    hot_retry_hours:           parseInt(g('s-retry')?.value||'3'),
+    hot_max_attempts:          parseInt(g('s-maxatt')?.value||'6'),
+    hot_auto_sms:              g('s-autosms')?.checked||false,
+    warm_day1_action:          g('s-w1')?.value||'call',
+    warm_day3_action:          g('s-w3')?.value||'email',
+    warm_day7_action:          g('s-w7')?.value||'call',
+    warm_day14_action:         g('s-w14')?.value||'email',
+    cold_day7_action:          g('s-c7')?.value||'sms',
+    cold_day30_action:         g('s-c30')?.value||'email',
+    sms_missed_call_template:  g('s-tmpl-missed')?.value||'',
+    sms_warm_followup:         g('s-tmpl-warm')?.value||'',
+    sms_cold_reengage:         g('s-tmpl-cold')?.value||'',
+  };
+
+  const { error } = await sb.from('workflow_configs')
+    .upsert({ ...payload, user_id: currentUser.id }, { onConflict: 'user_id' });
+
+  if (error) { showToast('Save failed: ' + error.message, 'error'); return; }
+  workflowCfg = { ...workflowCfg, ...payload };
+  showToast('Settings saved', 'success');
+}
+
+// ── LEAD DETAIL ───────────────────────────────────────────────
+async function openLeadDetail(id) {
+  selectedLead = allLeads.find(l=>l.id===id) || null;
+  if (selectedLead) render();
+}
+
+async function renderLeadDetail(main) {
+  const l = selectedLead;
+  main.innerHTML = `<div class="content"><div class="loading"><div class="spinner"></div> Loading...</div></div>`;
+  const activities = await loadActivities(l.id);
+  const leadTasks  = allTasks.filter(t=>t.lead_id===l.id);
+  const done       = leadTasks.filter(t=>t.status==='completed').length;
+  const wfSteps    = getWorkflowSteps(l, done);
+
+  main.innerHTML = `
+  <div class="topbar">
+    <button class="btn btn-sm" onclick="selectedLead=null;render()">← Back</button>
+    <div class="topbar-title">${l.name}</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      <button class="btn btn-sm" style="color:var(--hot)" onclick="changeStatus('${l.id}','hot')">🔥 Hot</button>
+      <button class="btn btn-sm" style="color:var(--warm)" onclick="changeStatus('${l.id}','warm')">🌡 Warm</button>
+      <button class="btn btn-sm" style="color:var(--cold)" onclick="changeStatus('${l.id}','cold')">❄️ Cold</button>
+    </div>
+  </div>
+  <div class="content">
+    <div class="lead-detail">
+      <div class="lead-detail-header">
+        <div class="avatar ${l.status}" style="width:52px;height:52px;font-size:18px;border-radius:50%;flex-shrink:0">${initials(l.name)}</div>
+        <div style="flex:1">
+          <div style="font-size:18px;font-weight:700">${l.name}</div>
+          <div style="font-size:13px;color:var(--text3);margin-top:2px">${l.lead_type||'Lead'} · ${l.phone} · ${l.email||'—'}</div>
+          <div style="font-size:12px;color:var(--text3);margin-top:4px">📍 ${l.address||'—'}</div>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+          <span class="status-badge ${l.status}" style="font-size:13px;padding:5px 12px">${l.status.toUpperCase()}</span>
+          <div style="font-size:12px;color:var(--text3)">Score: <strong style="color:var(--text)">${l.score}</strong></div>
+        </div>
+      </div>
+      <div class="detail-grid">
+        <div class="detail-cell"><div class="label">Calls</div><div class="val">${l.call_attempts||0} / ${workflowCfg.hot_max_attempts||6}</div></div>
+        <div class="detail-cell"><div class="label">SMS</div><div class="val">${l.sms_sent||0}</div></div>
+        <div class="detail-cell"><div class="label">Emails</div><div class="val">${l.emails_sent||0}</div></div>
+        <div class="detail-cell"><div class="label">Last Contact</div><div class="val">${fmtTime(l.last_contact_at)}</div></div>
+        <div class="detail-cell"><div class="label">Engaged</div><div class="val" style="color:${l.engaged?'var(--green)':'var(--text3)'}">${l.engaged?'✓ Yes':'✗ No'}</div></div>
+        <div class="detail-cell"><div class="label">Next Action</div><div class="val" style="font-size:12px">${l.next_action_label||'—'}</div></div>
+      </div>
+      <div class="detail-body">
+        <div class="detail-section">
+          <h3>Activity Timeline</h3>
+          ${activities.length ? activities.map(a=>`
+          <div class="timeline-item">
+            <div class="tl-icon ${a.type}">${{call:'📞',sms:'💬',email:'✉️',system:'⚙️'}[a.type]||'⚙️'}</div>
+            <div class="tl-content">
+              <div class="tl-title">${a.title}</div>
+              <div class="tl-sub">${a.description||''}</div>
+              <div class="tl-sub" style="opacity:.7">${fmtTime(a.created_at)}</div>
+              ${a.outcome?`<span class="tl-outcome ${a.outcome}">${a.outcome==='noanswer'?'No answer':a.outcome}</span>`:''}
+            </div>
+          </div>`).join('') : '<div style="font-size:13px;color:var(--text3)">No activity yet</div>'}
+        </div>
+        <div class="detail-section">
+          <h3>Workflow Progress</h3>
+          <div>${wfSteps.map((s,i)=>`
+          <div class="wf-step">
+            <div class="wf-dot ${s.status}">${s.status==='done'?'✓':s.status==='active'?'→':(i+1)}</div>
+            <div class="wf-text"><div class="wf-title">${s.title}</div><div class="wf-time">${s.time}</div></div>
+          </div>`).join('')}</div>
+          <div style="margin-top:16px">
+            <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Log Outcome</div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <button class="outcome-btn answered" onclick="quickOutcome('${l.id}','answered')">✓ Answered</button>
+              <button class="outcome-btn noanswer" onclick="quickOutcome('${l.id}','noanswer')">No Answer</button>
+              <button class="outcome-btn" onclick="quickOutcome('${l.id}','voicemail')">Voicemail</button>
+              <button class="outcome-btn notint" onclick="quickOutcome('${l.id}','notinterested')">Not Interested</button>
+            </div>
+          </div>
+          <div style="margin-top:16px">
+            <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Pending Tasks</div>
+            ${leadTasks.filter(t=>t.status==='pending').map(t=>`
+            <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">
+              <div class="task-type ${t.action_type}" style="padding:2px 6px;font-size:11px">${{call:'📞',sms:'💬',email:'✉️'}[t.action_type]} ${t.action_type}</div>
+              <div style="font-size:12px;color:var(--text2);flex:1">${fmtDue(t.due_at)}</div>
+              ${t.external_event_id?`<span style="font-size:9px;color:var(--green)">📅 synced</span>`:''}
+              ${t.overdue?`<span style="font-size:9px;color:var(--yellow);font-weight:700">OVERDUE</span>`:''}
+            </div>`).join('')||'<div style="font-size:12px;color:var(--text3)">No pending tasks</div>'}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function getWorkflowSteps(lead, completedCount) {
+  if (lead.status==='hot') return [
+    {title:'Immediate call',time:'Assigned',status:'done'},
+    {title:'SMS on no answer',time:'Auto',status:(lead.call_attempts||0)>=1?'done':'pending'},
+    {title:'2nd call',time:`+${workflowCfg.hot_retry_hours||3}h`,status:(lead.call_attempts||0)>=2?'done':'active'},
+    {title:'Further attempts',time:'Cadence',status:(lead.call_attempts||0)>=3?'done':'pending'},
+    {title:'Downgrade at max attempts',time:'Auto',status:'pending'},
+  ];
+  if (lead.status==='warm') return [
+    {title:'Day 1 touch',time:'Day 1',status:'done'},
+    {title:'Day 3 follow-up',time:'Day 3',status:completedCount>=2?'done':'active'},
+    {title:'Day 7 call',time:'Day 7',status:completedCount>=3?'done':'pending'},
+    {title:'Day 14 check-in',time:'Day 14',status:completedCount>=4?'done':'pending'},
+  ];
+  return [
+    {title:'Day 7 touch',time:'Day 7',status:completedCount>=1?'done':'active'},
+    {title:'Day 30 re-engage',time:'Day 30',status:completedCount>=2?'done':'pending'},
+    {title:'Day 60 recycle',time:'Day 60',status:completedCount>=3?'done':'pending'},
+  ];
+}
+
+function openAnsweredModal(leadId) {
+  const lead = allLeads.find(l=>l.id===leadId)||selectedLead;
+  if (!lead) return;
+  openModal(`
+  <div class="modal-header"><h3>✓ ${lead.name} Answered!</h3><button class="modal-close" onclick="closeModal()">✕</button></div>
+  <div class="modal-body">
+    <p style="font-size:13px;color:var(--text2);margin-bottom:16px">Workflow paused. What's the next step?</p>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <button class="btn" style="justify-content:flex-start" onclick="setNextAction('${leadId}','appointment')">📅 Schedule Appointment</button>
+      <button class="btn" style="justify-content:flex-start" onclick="setNextAction('${leadId}','offer')">💰 Send Offer / Proposal</button>
+      <button class="btn" style="justify-content:flex-start" onclick="setNextAction('${leadId}','followup')">📞 Follow-up Later</button>
+      <button class="btn" style="justify-content:flex-start" onclick="setNextAction('${leadId}','qualified')">✓ Mark as Qualified</button>
+    </div>
+  </div>`);
+}
+
+async function setNextAction(leadId, action) {
+  const map = {appointment:'Appointment scheduled',offer:'Offer sent',followup:'Follow-up scheduled',qualified:'Lead qualified ✓'};
+  await sb.from('leads').update({ next_action_label: map[action] }).eq('id', leadId);
+  await sb.from('activities').insert({ lead_id:leadId, user_id:currentUser.id,
+    type:'system', title:map[action], description:'Set after answered call' });
+  closeModal();
+  showToast(map[action], 'success');
+  await loadData();
+  if (selectedLead?.id===leadId) selectedLead = allLeads.find(l=>l.id===leadId);
+  render();
+}
+
+async function changeStatus(leadId, newStatus) {
+  const lead = allLeads.find(l=>l.id===leadId);
+  if (!lead||lead.status===newStatus) return;
+  await sb.from('leads').update({ status:newStatus }).eq('id', leadId);
+  await sb.from('activities').insert({ lead_id:leadId, user_id:currentUser.id,
+    type:'system', title:`Status → ${newStatus.toUpperCase()}`,
+    description:`${lead.status.toUpperCase()} → ${newStatus.toUpperCase()}` });
+  showToast(`${lead.name} moved to ${newStatus.toUpperCase()}`, 'info');
+  await loadData();
+  if (selectedLead?.id===leadId) selectedLead = allLeads.find(l=>l.id===leadId);
+  render();
+}
+
+// ── ADD LEAD ──────────────────────────────────────────────────
+function openAddLead() {
+  openModal(`
+  <div class="modal-header"><h3>Add New Lead</h3><button class="modal-close" onclick="closeModal()">✕</button></div>
+  <div class="modal-body">
+    <div class="form-row">
+      <div class="form-group"><label>First Name *</label><input type="text" id="nf" placeholder="John"></div>
+      <div class="form-group"><label>Last Name</label><input type="text" id="nl" placeholder="Smith"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Phone *</label><input type="tel" id="np" placeholder="+15025550100"></div>
+      <div class="form-group"><label>Email</label><input type="email" id="ne" placeholder="john@email.com"></div>
+    </div>
+    <div class="form-group"><label>Address / Property</label><input type="text" id="na" placeholder="123 Main St, Louisville KY"></div>
+    <div class="form-row">
+      <div class="form-group"><label>Lead Type</label><select id="nt"><option>Buyer</option><option>Seller</option><option>Renter</option><option>Investor</option></select></div>
+      <div class="form-group"><label>Status *</label><select id="ns"><option value="hot">🔥 Hot</option><option value="warm">🌡 Warm</option><option value="cold">❄️ Cold</option></select></div>
+    </div>
+    <div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;font-size:12px;color:var(--text2)">
+      ⚡ Workflow tasks will be created in the database and synced to Google Calendar.
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" id="add-lead-btn" onclick="addLead()">Add Lead & Start Workflow</button>
+  </div>`);
+}
+
+async function addLead() {
+  const g = id => document.getElementById(id);
+  const fname  = g('nf')?.value?.trim();
+  const lname  = g('nl')?.value?.trim()||'';
+  const phone  = g('np')?.value?.trim();
+  const email  = g('ne')?.value?.trim()||'';
+  const address= g('na')?.value?.trim()||'';
+  const type   = g('nt')?.value||'Buyer';
+  const status = g('ns')?.value||'hot';
+
+  if (!fname) { showToast('First name required', 'warning'); return; }
+  if (!phone) { showToast('Phone number required', 'warning'); return; }
+
+  const btn = document.getElementById('add-lead-btn');
+  if (btn) { btn.textContent = 'Adding...'; btn.disabled = true; }
+
+  try {
+    // Try Edge Function first
+    await callFn('create-task', {
+      name: `${fname} ${lname}`.trim(),
+      phone, email, address, lead_type: type, status,
+    });
+    closeModal();
+    showToast(`${fname} ${lname} added — ${status.toUpperCase()} workflow scheduled!`, 'success');
+    await loadData();
+    render();
+  } catch (e) {
+    // Edge function not deployed — direct DB insert with clear warning
+    showToast(`Edge Function unavailable: ${e.message}. Creating lead directly.`, 'warning');
+
+    const score = status==='hot'?90:status==='warm'?60:30;
+    const now = new Date(), MS = 86400000;
+    const { data: lead, error } = await sb.from('leads').insert({
+      name:`${fname} ${lname}`.trim(), phone, email, address,
+      lead_type: type, status, score, user_id: currentUser.id,
+      next_action_label: status==='hot'?'Call Now':status==='warm'?'Call today':'Day 7 touch',
+    }).select().single();
+
+    if (error) { showToast('Failed to add lead: '+error.message, 'error'); if(btn){btn.textContent='Add Lead & Start Workflow';btn.disabled=false;} return; }
+
+    await sb.from('activities').insert({ lead_id:lead.id, user_id:currentUser.id,
+      type:'system', title:`Lead added as ${status.toUpperCase()}`,
+      description:'Created directly (Edge Function unavailable)' });
+
+    const sched = status==='hot' ? [[0,'call','high']]
+      : status==='warm' ? [[0,'call','high'],[3,'email','medium'],[7,'call','medium'],[14,'email','low']]
+      : [[7,'sms','medium'],[30,'email','low'],[60,'email','low']];
+
+    const taskRows = sched.map(([d,a,p]) => ({
+      lead_id:lead.id, lead_name:lead.name, action_type:a,
+      due_at: new Date(now.getTime()+d*MS).toISOString(),
+      priority:p, user_id:currentUser.id,
+    }));
+    if (taskRows.length) await sb.from('tasks').insert(taskRows);
+
+    closeModal();
+    showToast(`${fname} ${lname} added (no calendar sync — deploy Edge Functions to enable)`, 'warning');
+    await loadData();
+    render();
+  }
+}
+
+// ── BOOT ──────────────────────────────────────────────────────
+initApp();
+</script>
+</body>
+</html>
