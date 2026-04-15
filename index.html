@@ -555,8 +555,10 @@ function render() {
   const main = document.getElementById('main-content');
   if (!main) return;
   if (selectedLead) {
+    main.innerHTML = '<div class="content"><div class="loading"><div class="spinner"></div> Loading lead...</div></div>';
     renderLeadDetail(main).catch(e => {
-      main.innerHTML = `<div class="content"><div style="color:var(--hot);padding:40px">Error: ${e.message}</div></div>`;
+      selectedLead = null;
+      main.innerHTML = `<div class="content"><div style="color:var(--hot);padding:40px">Error loading lead: ${e.message}<br><button class="btn" onclick="render()" style="margin-top:12px">← Go Back</button></div></div>`;
     });
     return;
   }
@@ -671,13 +673,14 @@ function renderLeads(main) {
   <div class="content">
     <div class="leads-table" id="leads-table">${buildLeadsTable(allLeads)}</div>
   </div>`;
+  _filterStatus = 'all';
 }
 
 function buildLeadsTable(data) {
   if (!data.length) return '<div class="empty-state"><div class="icon">👥</div><p>No leads yet — add your first lead</p></div>';
   return `<div class="table-header"><div>Lead</div><div>Status</div><div>Score</div><div>Attempts</div><div>Last Contact</div><div>Next Action</div></div>
   ${data.map(l=>`
-  <div class="table-row" onclick="openLeadDetail('${l.id}')">
+  <div class="table-row" onclick="openLeadDetail('${l.id}')" style="position:relative">
     <div class="lead-name-col"><div class="avatar ${l.status}">${initials(l.name)}</div>
       <div class="lead-info"><div class="name">${l.name}</div><div class="phone">${l.phone}</div></div></div>
     <div><span class="status-badge ${l.status}">${l.status.toUpperCase()}</span></div>
@@ -900,8 +903,10 @@ async function saveSettings() {
 
 // ── LEAD DETAIL ───────────────────────────────────────────────
 async function openLeadDetail(id) {
+  if (!id) return;
   selectedLead = allLeads.find(l=>l.id===id) || null;
   if (selectedLead) render();
+  else showToast('Lead not found', 'warning');
 }
 
 async function renderLeadDetail(main) {
@@ -920,6 +925,8 @@ async function renderLeadDetail(main) {
       <button class="btn btn-sm" style="color:var(--hot)" onclick="changeStatus('${l.id}','hot')">🔥 Hot</button>
       <button class="btn btn-sm" style="color:var(--warm)" onclick="changeStatus('${l.id}','warm')">🌡 Warm</button>
       <button class="btn btn-sm" style="color:var(--cold)" onclick="changeStatus('${l.id}','cold')">❄️ Cold</button>
+      <button class="btn btn-sm" onclick="openEditLead('${l.id}')">✏️ Edit</button>
+      <button class="btn btn-sm" style="color:var(--hot)" onclick="confirmDeleteLead('${l.id}','${l.name.replace(/'/g, "\'")}')">🗑 Delete</button>
     </div>
   </div>
   <div class="content">
@@ -1049,6 +1056,89 @@ async function changeStatus(leadId, newStatus) {
   showToast(`${lead.name} moved to ${newStatus.toUpperCase()}`, 'info');
   await loadData();
   if (selectedLead?.id===leadId) selectedLead = allLeads.find(l=>l.id===leadId);
+  render();
+}
+
+// ── EDIT LEAD ─────────────────────────────────────────────────
+function openEditLead(id) {
+  const l = allLeads.find(x=>x.id===id);
+  if (!l) return;
+  openModal(`
+  <div class="modal-header"><h3>Edit Lead</h3><button class="modal-close" onclick="closeModal()">✕</button></div>
+  <div class="modal-body">
+    <div class="form-row">
+      <div class="form-group"><label>Name</label><input type="text" id="ef-name" value="${l.name}"></div>
+      <div class="form-group"><label>Phone</label><input type="tel" id="ef-phone" value="${l.phone}"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Email</label><input type="email" id="ef-email" value="${l.email||''}"></div>
+      <div class="form-group"><label>Lead Type</label>
+        <select id="ef-type">
+          ${['Buyer','Seller','Renter','Investor'].map(t=>`<option value="${t}" ${l.lead_type===t?'selected':''}>${t}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="form-group"><label>Address</label><input type="text" id="ef-address" value="${l.address||''}"></div>
+    <div class="form-row">
+      <div class="form-group"><label>Status</label>
+        <select id="ef-status">
+          ${['hot','warm','cold','inactive'].map(s=>`<option value="${s}" ${l.status===s?'selected':''}>${s.charAt(0).toUpperCase()+s.slice(1)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group"><label>Score (0–100)</label><input type="number" id="ef-score" value="${l.score}" min="0" max="100"></div>
+    </div>
+    <div class="form-group"><label>Next Action Label</label><input type="text" id="ef-next" value="${l.next_action_label||''}"></div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="saveLead('${l.id}')">Save Changes</button>
+  </div>`);
+}
+
+async function saveLead(id) {
+  const g = x => document.getElementById(x)?.value?.trim();
+  const updates = {
+    name:              g('ef-name'),
+    phone:             g('ef-phone'),
+    email:             g('ef-email')||null,
+    address:           g('ef-address')||null,
+    lead_type:         g('ef-type'),
+    status:            g('ef-status'),
+    score:             parseInt(g('ef-score'))||60,
+    next_action_label: g('ef-next')||null,
+  };
+  if (!updates.name || !updates.phone) { showToast('Name and phone required','warning'); return; }
+  const { error } = await sb.from('leads').update(updates).eq('id', id);
+  if (error) { showToast('Save failed: '+error.message,'error'); return; }
+  await sb.from('activities').insert({ lead_id:id, user_id:currentUser.id,
+    type:'system', title:'Lead details updated', description:`Edited by user` });
+  closeModal();
+  showToast('Lead updated successfully','success');
+  await loadData();
+  selectedLead = allLeads.find(l=>l.id===id)||null;
+  render();
+}
+
+function confirmDeleteLead(id, name) {
+  openModal(`
+  <div class="modal-header"><h3>Delete Lead</h3><button class="modal-close" onclick="closeModal()">✕</button></div>
+  <div class="modal-body">
+    <p style="font-size:14px;color:var(--text);margin-bottom:12px">Are you sure you want to delete <strong>${name}</strong>?</p>
+    <p style="font-size:13px;color:var(--text3)">This will permanently delete the lead, all tasks, and all activity history. This cannot be undone.</p>
+  </div>
+  <div class="modal-footer">
+    <button class="btn" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" style="background:var(--hot);border-color:var(--hot)" onclick="deleteLead('${id}')">Yes, Delete Lead</button>
+  </div>`);
+}
+
+async function deleteLead(id) {
+  const { error } = await sb.from('leads').delete().eq('id', id);
+  if (error) { showToast('Delete failed: '+error.message,'error'); return; }
+  closeModal();
+  selectedLead = null;
+  showToast('Lead deleted','warning');
+  await loadData();
   render();
 }
 
