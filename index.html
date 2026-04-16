@@ -460,27 +460,38 @@ async function callFn(name, body) {
   const { data: { session } } = await sb.auth.getSession();
   if (!session) throw new Error('Not authenticated');
 
-  const res = await fetch(FN(name), {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${session.access_token}`,
-    },
-    body: JSON.stringify(body),
-  });
+  // 8 second timeout so we fall back to local quickly
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
 
-  const data = await res.json();
+  try {
+    const res = await fetch(FN(name), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
 
-  if (!res.ok || !data.success) {
-    throw new Error(data.error || `Function ${name} failed (${res.status})`);
+    const data = await res.json();
+
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || `Function ${name} failed (${res.status})`);
+    }
+
+    if (data.data?.warnings?.length) {
+      data.data.warnings.forEach(w => showToast(`⚠ ${w}`, 'warning'));
+    }
+
+    return data.data;
+  } catch(e) {
+    clearTimeout(timeout);
+    if (e.name === 'AbortError') throw new Error('Edge Function timeout — using local fallback');
+    throw e;
   }
-
-  // Show warnings as non-blocking toasts
-  if (data.data?.warnings?.length) {
-    data.data.warnings.forEach(w => showToast(`⚠ ${w}`, 'warning'));
-  }
-
-  return data.data;
 }
 
 // ── OUTCOME PROCESSING ─────────────────────────────────────────
@@ -491,31 +502,13 @@ async function processOutcome(leadId, taskId, outcome) {
   showToast('Processing...', 'info');
 
   try {
-    // Try Edge Function first
-    let result;
-    try {
-      result = await callFn('process-outcomes', {
-        lead_id: leadId, task_id: taskId || null, outcome,
-      });
-    } catch(e) {
-      // Edge Function unavailable — fall back to local
-      console.warn('Edge Function unavailable, running locally:', e.message);
-      await localOutcome(leadId, taskId, outcome);
-      result = null;
-    }
+    // Run locally first (instant), then try Edge Function for calendar sync
+    await localOutcome(leadId, taskId, outcome);
 
-    if (result) {
-      const msgs = {
-        workflow_paused:    '✓ Lead answered — workflow paused',
-        retry_scheduled:    'Next call scheduled',
-        downgraded_to_warm: 'Lead downgraded to WARM',
-        lead_inactive:      'Lead marked inactive',
-        sequence_continues: '✓ Step completed — sequence continues',
-      };
-      const type = outcome==='answered'?'success':outcome==='notinterested'?'warning':['sent','replied'].includes(outcome)?'success':'info';
-      showToast(msgs[result.action] || 'Outcome logged ✓', type);
-      if (outcome === 'answered') openAnsweredModal(leadId);
-    }
+    // Try Edge Function in background for calendar sync only (non-blocking)
+    callFn('process-outcomes', {
+      lead_id: leadId, task_id: taskId || null, outcome,
+    }).catch(e => console.warn('Edge Function (non-critical):', e.message));
 
     await loadData();
     if (selectedLead?.id === leadId) selectedLead = allLeads.find(l=>l.id===leadId) || null;
