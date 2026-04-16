@@ -484,46 +484,50 @@ async function callFn(name, body) {
 }
 
 // ── OUTCOME PROCESSING ─────────────────────────────────────────
-// NO fallback. Backend is the single source of truth.
 async function processOutcome(leadId, taskId, outcome) {
   if (processingOutcome) return;
   processingOutcome = true;
   document.querySelectorAll('.outcome-btn').forEach(b => b.disabled = true);
   showToast('Processing...', 'info');
 
-  // Try Edge Function first, fall back to direct DB if unavailable
-  let usedEdgeFunction = false;
   try {
-    const result = await callFn('process-outcomes', {
-      lead_id: leadId, task_id: taskId || null, outcome,
-    });
-    usedEdgeFunction = true;
-    const msgs = {
-      workflow_paused:    '✓ Lead answered — workflow paused',
-      retry_scheduled:    'No answer logged — next call scheduled',
-      downgraded_to_warm: 'Lead downgraded to WARM — warm workflow started',
-      lead_inactive:      'Lead marked inactive — all tasks stopped',
-    };
-    const type = outcome==='answered'?'success':outcome==='notinterested'?'warning':'info';
-    showToast(msgs[result.action] || 'Outcome logged', type);
-    if (outcome === 'answered') openAnsweredModal(leadId);
-  } catch(e) {
-    // Edge Function unavailable — run locally
-    console.warn('Edge Function unavailable, running locally:', e.message);
+    // Try Edge Function first
+    let result;
     try {
+      result = await callFn('process-outcomes', {
+        lead_id: leadId, task_id: taskId || null, outcome,
+      });
+    } catch(e) {
+      // Edge Function unavailable — fall back to local
+      console.warn('Edge Function unavailable, running locally:', e.message);
       await localOutcome(leadId, taskId, outcome);
-    } catch(e2) {
-      showToast('Error: ' + e2.message, 'error');
-      document.querySelectorAll('.outcome-btn').forEach(b => b.disabled = false);
-      processingOutcome = false;
-      return;
+      result = null;
     }
-  }
 
-  await loadData();
-  if (selectedLead?.id === leadId) selectedLead = allLeads.find(l=>l.id===leadId) || null;
-  processingOutcome = false;
-  render();
+    if (result) {
+      const msgs = {
+        workflow_paused:    '✓ Lead answered — workflow paused',
+        retry_scheduled:    'Next call scheduled',
+        downgraded_to_warm: 'Lead downgraded to WARM',
+        lead_inactive:      'Lead marked inactive',
+        sequence_continues: '✓ Step completed — sequence continues',
+      };
+      const type = outcome==='answered'?'success':outcome==='notinterested'?'warning':['sent','replied'].includes(outcome)?'success':'info';
+      showToast(msgs[result.action] || 'Outcome logged ✓', type);
+      if (outcome === 'answered') openAnsweredModal(leadId);
+    }
+
+    await loadData();
+    if (selectedLead?.id === leadId) selectedLead = allLeads.find(l=>l.id===leadId) || null;
+    render();
+
+  } catch(e) {
+    showToast('Error: ' + e.message, 'error');
+    console.error('processOutcome error:', e);
+  } finally {
+    processingOutcome = false;
+    document.querySelectorAll('.outcome-btn').forEach(b => b.disabled = false);
+  }
 }
 
 async function localOutcome(leadId, taskId, outcome) {
