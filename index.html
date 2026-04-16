@@ -599,7 +599,6 @@ async function localOutcome(leadId, taskId, outcome) {
       await sb.from('tasks').insert({
         lead_id:leadId, lead_name:lead.name, action_type:'call',
         due_at:nextCall.toISOString(), priority:'high', user_id:currentUser.id,
-        attempt_number:newAttempts+1,
         sequence_step_label:`Retry Call #${newAttempts+1}`,
         sequence_type: lead.status,
       });
