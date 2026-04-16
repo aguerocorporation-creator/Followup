@@ -538,6 +538,7 @@ async function localOutcome(leadId, taskId, outcome) {
   // Get task type so we can route correctly
   const task = taskId ? allTasks.find(t=>t.id===taskId) : null;
   const taskType = task?.action_type || 'call';
+  if (!workflowCfg) { console.warn('workflowCfg not loaded, using defaults'); }
   const stepLabel = task?.sequence_step_label || getTaskSequenceLabel(task||{}, lead) || '';
 
   // Mark task completed
@@ -677,14 +678,17 @@ async function localOutcome(leadId, taskId, outcome) {
 }
 
 async function quickOutcome(leadId, outcome) {
-  // Find the next pending task for this lead (sorted by due_at)
   const task = allTasks
     .filter(t => t.lead_id === leadId && t.status === 'pending')
     .sort((a,b) => new Date(a.due_at) - new Date(b.due_at))[0];
+  console.log('quickOutcome:', leadId, outcome, 'task:', task?.id);
+  if (!leadId) { showToast('Error: no lead ID', 'error'); return; }
   await processOutcome(leadId, task?.id || null, outcome);
 }
 
 async function logOutcomeTask(taskId, leadId, outcome) {
+  console.log('logOutcomeTask:', taskId, leadId, outcome);
+  if (!leadId) { showToast('Error: no lead ID', 'error'); return; }
   await processOutcome(leadId, taskId, outcome);
 }
 
