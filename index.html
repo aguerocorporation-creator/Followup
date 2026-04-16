@@ -1629,18 +1629,13 @@ async function addLead() {
   if (btn) { btn.textContent = 'Adding...'; btn.disabled = true; }
 
   try {
-    // Try Edge Function first
-    await callFn('create-task', {
-      name: `${fname} ${lname}`.trim(),
-      phone, email, address, lead_type: type, status,
-    });
-    closeModal();
-    showToast(`${fname} ${lname} added — ${status.toUpperCase()} workflow scheduled!`, 'success');
-    await loadData();
-    render();
+    // Direct DB insert (no Edge Function needed for lead creation)
+    if (false) throw new Error('skip');
   } catch (e) {
-    // Edge function not deployed — direct DB insert with clear warning
-    showToast(`Edge Function unavailable: ${e.message}. Creating lead directly.`, 'warning');
+    // fallthrough to direct insert
+  }
+  {
+    const e = null;
 
     const score = status==='hot'?90:status==='warm'?60:30;
     const now = new Date(), MS = 86400000;
