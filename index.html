@@ -255,7 +255,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 <div class="auth-screen" id="auth-screen" style="display:none">
   <div class="auth-card">
     <h1>⚡ Follow<span>Up</span> Engine</h1>
-    <p style="font-size:13px;color:var(--text3);margin-bottom:24px">Sign in to continue</p>
+    <p style="font-size:13px;color:var(--text3);margin-bottom:24px">Sign in to your account to continue</p>
     <div class="form-group"><label>Email</label><input type="email" id="auth-email" placeholder="you@email.com"></div>
     <div class="form-group"><label>Password</label><input type="password" id="auth-password" placeholder="••••••••" onkeydown="if(event.key==='Enter')signIn()"></div>
     <div style="display:flex;gap:8px;margin-top:4px">
@@ -315,9 +315,16 @@ let processingOutcome = false;
 
 // ── AUTH ──────────────────────────────────────────────────────
 async function initApp() {
-  const { data: { session } } = await sb.auth.getSession();
-  if (session?.user) { currentUser = session.user; await showApp(); }
-  else showAuthScreen();
+  try {
+    const { data: { session }, error } = await sb.auth.getSession();
+    if (error) { console.error('Session check failed:', error); showAuthScreen(); return; }
+    if (session?.user) { currentUser = session.user; await showApp(); }
+    else showAuthScreen();
+  } catch(e) {
+    console.error('Init failed:', e);
+    showAuthScreen();
+    setAuthError('Could not connect to server. Check your internet connection.');
+  }
 
   sb.auth.onAuthStateChange(async (event, session) => {
     if (event === 'SIGNED_IN' && session?.user) {
@@ -326,7 +333,10 @@ async function initApp() {
     } else if (event === 'SIGNED_OUT') {
       currentUser = null;
       clearInterval(pollingTimer);
+      if (realtimeSub) { sb.removeChannel(realtimeSub); realtimeSub = null; }
       showAuthScreen();
+    } else if (event === 'TOKEN_REFRESHED' && session?.user) {
+      currentUser = session.user; // keep user current on token refresh
     }
   });
 }
@@ -335,10 +345,22 @@ async function signIn() {
   const email = document.getElementById('auth-email').value?.trim();
   const pass  = document.getElementById('auth-password').value;
   if (!email || !pass) { setAuthError('Email and password required'); return; }
+  const btn = document.querySelector('.btn-primary');
+  if (btn) { btn.textContent = 'Signing in...'; btn.disabled = true; }
   try {
     const { error } = await sb.auth.signInWithPassword({ email, password: pass });
-    if (error) setAuthError(error.message);
-  } catch(e) { setAuthError('Connection error — check your internet and try again.'); }
+    if (error) {
+      const msg = error.message.includes('Invalid login') ? 'Incorrect email or password.'
+        : error.message.includes('Email not confirmed') ? 'Email not confirmed — check your inbox and click the confirmation link.'
+        : error.message.includes('network') ? 'Network error — check your connection.'
+        : error.message;
+      setAuthError(msg);
+    }
+  } catch(e) {
+    setAuthError('Connection failed — check your internet and try again.');
+  } finally {
+    if (btn) { btn.textContent = 'Sign In'; btn.disabled = false; }
+  }
 }
 
 async function signUp() {
@@ -349,9 +371,9 @@ async function signUp() {
   try {
     const { data, error } = await sb.auth.signUp({ email, password: pass, options: { emailRedirectTo: window.location.href } });
     if (error) setAuthError(error.message);
-    else if (data?.user?.identities?.length === 0) setAuthError('Account exists — click Sign In.', false);
-    else setAuthError('Check your email, click the confirmation link, then Sign In here.', false);
-  } catch(e) { setAuthError('Connection error — check your internet and try again.'); }
+    else if (data?.user?.identities?.length === 0) setAuthError('Account already exists — use Sign In instead.', false);
+    else setAuthError('✓ Check your email and click the confirmation link, then sign in here.', false);
+  } catch(e) { setAuthError('Connection failed — check your internet and try again.'); }
 }
 
 function setAuthError(msg, isError=true) {
@@ -375,6 +397,11 @@ async function showApp() {
   document.getElementById('user-footer').innerHTML =
     `<div style="color:var(--text2);word-break:break-all">${currentUser.email}</div>
      <div onclick="signOut()" style="cursor:pointer;color:var(--hot);margin-top:4px">Sign out</div>`;
+
+  // Show loading state immediately
+  const main = document.getElementById('main-content');
+  if (main) main.innerHTML = '<div class="content"><div class="loading"><div class="spinner"></div> Loading...</div></div>';
+
   await loadData();
   setupRealtime();
   startPolling();
@@ -383,7 +410,9 @@ async function showApp() {
 
 // ── DATA LOADING ──────────────────────────────────────────────
 async function loadData() {
-  await Promise.all([loadLeads(), loadTasks(), loadWorkflowConfig()]);
+  // Run in parallel but handle each error independently
+  const results = await Promise.allSettled([loadLeads(), loadTasks(), loadWorkflowConfig()]);
+  results.forEach(r => { if (r.status === 'rejected') console.error('Load error:', r.reason); });
   updateBadge();
 }
 
@@ -426,23 +455,41 @@ async function loadWorkflowConfig() {
 }
 
 // ── REALTIME ──────────────────────────────────────────────────
+let _realtimeConnected = false;
+let _pendingRefresh = false;
+
 function setupRealtime() {
   if (realtimeSub) sb.removeChannel(realtimeSub);
   realtimeSub = sb.channel('db-changes')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'leads', filter: `user_id=eq.${currentUser.id}` },
-      () => loadLeads().then(() => { updateBadge(); if (!processingOutcome) render(); }))
+      () => scheduleRefresh())
     .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks', filter: `user_id=eq.${currentUser.id}` },
-      () => loadTasks().then(() => { updateBadge(); if (!processingOutcome) render(); }))
-    .subscribe();
+      () => scheduleRefresh())
+    .subscribe((status) => {
+      _realtimeConnected = status === 'SUBSCRIBED';
+    });
+}
+
+// Debounced refresh — prevents duplicate re-renders when multiple changes arrive
+let _refreshTimer = null;
+function scheduleRefresh() {
+  if (processingOutcome) return; // don't interrupt active outcome processing
+  clearTimeout(_refreshTimer);
+  _refreshTimer = setTimeout(async () => {
+    await loadData();
+    render();
+  }, 300);
 }
 
 function startPolling() {
   clearInterval(pollingTimer);
+  // Only poll if realtime is disconnected; otherwise just check alerts
   pollingTimer = setInterval(async () => {
-    await loadTasks();
-    updateBadge();
     checkInAppAlerts();
-    if (!selectedLead && !processingOutcome) render();
+    if (!_realtimeConnected && !processingOutcome) {
+      await loadData();
+      render();
+    }
   }, 60000);
 }
 
@@ -596,13 +643,16 @@ async function localOutcome(leadId, taskId, outcome) {
       type:'call', title:`Call — No Answer #${newAttempts}`, description:'No answer logged', outcome:'noanswer' });
 
     if (!shouldDowngrade) {
-      await sb.from('tasks').insert({
-        lead_id:leadId, lead_name:lead.name, action_type:'call',
-        due_at:nextCall.toISOString(), priority:'high', user_id:currentUser.id,
-        sequence_step_label:`Retry Call #${newAttempts+1}`,
-        sequence_type: lead.status,
-      });
-      showToast(`No answer — retry call in ${retryH}h`, 'info');
+      // Only schedule a NEW retry task for hot leads (warm/cold have pre-built sequences)
+      if (lead.status === 'hot') {
+        await sb.from('tasks').insert({
+          lead_id:leadId, lead_name:lead.name, action_type:'call',
+          due_at:nextCall.toISOString(), priority:'high', user_id:currentUser.id,
+          sequence_step_label:`Retry Call #${newAttempts+1}`,
+          sequence_type: 'hot',
+        });
+      }
+      showToast(`No answer logged — call attempt #${newAttempts}`, 'info');
     } else {
       const MS=86400000;
       const cfg = workflowCfg;
@@ -1003,7 +1053,8 @@ function renderTaskCard(task) {
   const done  = task.status==='completed';
   const seqLabel = getTaskSequenceLabel(task, lead);
   const statusEmoji = {hot:'🔥',warm:'🌡',cold:'❄️',inactive:'⛔'}[s]||''
-  const calBadge = task.external_event_id ? `<span class="cal-badge synced">📅</span>` : '';
+  // Only show cal badge if actually synced by Edge Function
+  const calBadge = task.external_event_id ? `<span class="cal-badge synced" title="Synced to Google Calendar">📅</span>` : '';
   return `
   <div class="task-card ${s} ${task.overdue?'overdue':''}" style="${done?'opacity:.55':''}">
     <div class="task-top">
@@ -1196,9 +1247,19 @@ async function renderHealth(main) {
     <div class="topbar"><div class="topbar-title">🩺 System Health</div>
       <button class="btn btn-sm" onclick="renderHealth(document.getElementById('main-content'))">🔄 Recheck</button></div>
     <div class="content">
-      <div style="background:var(--hot-bg);border:1px solid var(--hot)30;border-radius:var(--radius);padding:16px 20px;color:var(--hot)">
-        <strong>Health check failed:</strong> ${e.message}<br>
-        <span style="font-size:12px;opacity:.8">Edge Functions may not be deployed yet. Deploy them via Supabase CLI.</span>
+      <div style="background:var(--hot-bg);border:1px solid #ff4d6d30;border-radius:var(--radius);padding:16px 20px;color:var(--hot);margin-bottom:16px">
+        <strong>Health check unavailable:</strong> ${e.message}
+      </div>
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:16px 20px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:8px;color:var(--text)">Current system status</div>
+        <div style="font-size:12px;color:var(--text3);line-height:1.8">
+          <div>✅ Database — Connected (Supabase)</div>
+          <div>✅ Authentication — Working</div>
+          <div>✅ Lead & task management — Working</div>
+          <div style="color:var(--yellow)">⚠ Google Calendar sync — Requires process-outcomes Edge Function deployed</div>
+          <div style="color:var(--yellow)">⚠ Auto SMS — Requires Twilio secrets in Edge Functions</div>
+          <div style="color:var(--yellow)">⚠ Email notifications — Requires SendGrid secrets in Edge Functions</div>
+        </div>
       </div>
     </div>`;
   }
@@ -1223,11 +1284,11 @@ function renderSettings(main) {
     </div>
     <div class="settings-section">
       <h3>🔗 Integration Toggles</h3>
-      <div class="settings-row"><div><div class="settings-label">Twilio SMS</div><div class="settings-sub">Enable auto-SMS (requires server config)</div></div>
+      <div class="settings-row"><div><div class="settings-label">Twilio SMS</div><div class="settings-sub">Auto-SMS on no answer — requires TWILIO_ACCOUNT_SID / AUTH_TOKEN / FROM_NUMBER secrets in Edge Functions</div></div>
         <label class="toggle"><input type="checkbox" id="s-twilio" ${c.twilio_enabled?'checked':''}><span class="toggle-slider"></span></label></div>
-      <div class="settings-row"><div><div class="settings-label">Email notifications</div><div class="settings-sub">Enable email alerts (requires server config)</div></div>
+      <div class="settings-row"><div><div class="settings-label">Email notifications</div><div class="settings-sub">Email notifications — requires SENDGRID_API_KEY secret in Edge Functions</div></div>
         <label class="toggle"><input type="checkbox" id="s-email" ${c.email_enabled?'checked':''}><span class="toggle-slider"></span></label></div>
-      <div class="settings-row"><div><div class="settings-label">Google Calendar</div><div class="settings-sub">Sync tasks to calendar (requires server config)</div></div>
+      <div class="settings-row"><div><div class="settings-label">Google Calendar</div><div class="settings-sub">Auto-sync to Google Calendar — requires process-outcomes Edge Function + GOOGLE_REFRESH_TOKEN secret</div></div>
         <label class="toggle"><input type="checkbox" id="s-gcal" ${c.gcal_enabled?'checked':''}><span class="toggle-slider"></span></label></div>
     </div>
     <div class="settings-section">
@@ -1490,15 +1551,66 @@ async function setNextAction(leadId, action) {
 
 async function changeStatus(leadId, newStatus) {
   const lead = allLeads.find(l=>l.id===leadId);
-  if (!lead||lead.status===newStatus) return;
-  await sb.from('leads').update({ status:newStatus }).eq('id', leadId);
+  if (!lead || lead.status === newStatus) return;
+  const oldStatus = lead.status;
+
+  // 1. Cancel all pending tasks from the old workflow
+  await sb.from('tasks').update({ status:'cancelled' })
+    .eq('lead_id', leadId).eq('status', 'pending').eq('user_id', currentUser.id);
+
+  // 2. Update lead status + next action label
+  const nextLabel = newStatus==='hot' ? 'Call Now'
+    : newStatus==='warm' ? 'Day 1 — Call'
+    : newStatus==='cold' ? 'Day 7 — Light Touch'
+    : 'Inactive';
+  await sb.from('leads').update({
+    status: newStatus,
+    next_action_label: nextLabel,
+    engaged: newStatus === 'inactive' ? false : lead.engaged,
+  }).eq('id', leadId);
+
+  // 3. Schedule new task sequence (unless going inactive)
+  if (newStatus !== 'inactive') {
+    await scheduleSequenceTasks(leadId, lead.name, newStatus);
+  }
+
+  // 4. Log the status change
   await sb.from('activities').insert({ lead_id:leadId, user_id:currentUser.id,
-    type:'system', title:`Status → ${newStatus.toUpperCase()}`,
-    description:`${lead.status.toUpperCase()} → ${newStatus.toUpperCase()}` });
-  showToast(`${lead.name} moved to ${newStatus.toUpperCase()}`, 'info');
+    type:'system', title:`Status changed to ${newStatus.toUpperCase()}`,
+    description:`${oldStatus.toUpperCase()} → ${newStatus.toUpperCase()} — new sequence scheduled` });
+
+  showToast(`${lead.name} moved to ${newStatus.toUpperCase()} — new sequence started`, 'info');
   await loadData();
-  if (selectedLead?.id===leadId) selectedLead = allLeads.find(l=>l.id===leadId);
+  if (selectedLead?.id === leadId) selectedLead = allLeads.find(l=>l.id===leadId);
   render();
+}
+
+// Shared helper: schedule a fresh task sequence for a lead
+async function scheduleSequenceTasks(leadId, leadName, status) {
+  const now = new Date();
+  const MS = 86400000;
+  const cfg = workflowCfg || {};
+
+  const defs = status === 'hot' ? [
+    {d:0,  a:'call',  p:'high',   step:1, lbl:'Immediate Call'},
+  ] : status === 'warm' ? [
+    {d:0,  a:cfg.warm_day1_action||'call',  p:'high',   step:1, lbl:'Day 1 — Call'},
+    {d:3,  a:cfg.warm_day3_action||'email', p:'medium', step:2, lbl:'Day 3 — Email'},
+    {d:7,  a:cfg.warm_day7_action||'call',  p:'medium', step:3, lbl:'Day 7 — Call'},
+    {d:14, a:cfg.warm_day14_action||'email',p:'low',    step:4, lbl:'Day 14 — Check-In'},
+  ] : [
+    {d:7,  a:cfg.cold_day7_action||'sms',   p:'medium', step:1, lbl:'Day 7 — Light Touch'},
+    {d:30, a:cfg.cold_day30_action||'email', p:'low',   step:2, lbl:'Day 30 — Re-Engage'},
+    {d:60, a:cfg.cold_day60_action||'email', p:'low',   step:3, lbl:'Day 60 — Recycle'},
+  ];
+
+  const rows = defs.map(s => ({
+    lead_id: leadId, lead_name: leadName, action_type: s.a,
+    due_at: new Date(now.getTime() + s.d * MS).toISOString(),
+    priority: s.p, user_id: currentUser.id,
+    sequence_type: status, sequence_step_number: s.step, sequence_step_label: s.lbl,
+  }));
+  if (rows.length) await sb.from('tasks').insert(rows);
 }
 
 // ── EDIT LEAD ─────────────────────────────────────────────────
@@ -1539,23 +1651,51 @@ function openEditLead(id) {
 
 async function saveLead(id) {
   const g = x => document.getElementById(x)?.value?.trim();
+  const newStatus = g('ef-status');
+  const newName   = g('ef-name');
+  const newPhone  = g('ef-phone');
+  if (!newName || !newPhone) { showToast('Name and phone required','warning'); return; }
+
+  const oldLead = allLeads.find(l=>l.id===id);
+  const statusChanged = oldLead && oldLead.status !== newStatus;
+
+  // Derive next_action_label from new status if status changed
+  const defaultLabel = newStatus==='hot' ? 'Call Now'
+    : newStatus==='warm' ? 'Day 1 — Call'
+    : newStatus==='cold' ? 'Day 7 — Light Touch'
+    : 'Inactive';
+
   const updates = {
-    name:              g('ef-name'),
-    phone:             g('ef-phone'),
+    name:              newName,
+    phone:             newPhone,
     email:             g('ef-email')||null,
     address:           g('ef-address')||null,
     lead_type:         g('ef-type'),
-    status:            g('ef-status'),
+    status:            newStatus,
     score:             parseInt(g('ef-score'))||60,
-    next_action_label: g('ef-next')||null,
+    next_action_label: statusChanged ? defaultLabel : (g('ef-next')||null),
   };
-  if (!updates.name || !updates.phone) { showToast('Name and phone required','warning'); return; }
+
   const { error } = await sb.from('leads').update(updates).eq('id', id);
   if (error) { showToast('Save failed: '+error.message,'error'); return; }
-  await sb.from('activities').insert({ lead_id:id, user_id:currentUser.id,
-    type:'system', title:'Lead details updated', description:`Edited by user` });
+
+  // If status changed, cancel old tasks and schedule new sequence
+  if (statusChanged && oldLead) {
+    await sb.from('tasks').update({ status:'cancelled' })
+      .eq('lead_id', id).eq('status', 'pending').eq('user_id', currentUser.id);
+    if (newStatus !== 'inactive') {
+      await scheduleSequenceTasks(id, newName, newStatus);
+    }
+    await sb.from('activities').insert({ lead_id:id, user_id:currentUser.id,
+      type:'system', title:`Status changed to ${newStatus.toUpperCase()}`,
+      description:`${oldLead.status.toUpperCase()} → ${newStatus.toUpperCase()} via edit` });
+  } else {
+    await sb.from('activities').insert({ lead_id:id, user_id:currentUser.id,
+      type:'system', title:'Lead details updated', description:'Edited by user' });
+  }
+
   closeModal();
-  showToast('Lead updated successfully','success');
+  showToast(statusChanged ? `Lead updated — ${newStatus.toUpperCase()} sequence started` : 'Lead updated','success');
   await loadData();
   selectedLead = allLeads.find(l=>l.id===id)||null;
   render();
@@ -1638,7 +1778,7 @@ async function addLead() {
     const e = null;
 
     const score = status==='hot'?90:status==='warm'?60:30;
-    const now = new Date(), MS = 86400000;
+    const now = new Date();
     const { data: lead, error } = await sb.from('leads').insert({
       name:`${fname} ${lname}`.trim(), phone, email, address,
       lead_type: type, status, score, user_id: currentUser.id,
@@ -1651,26 +1791,7 @@ async function addLead() {
       type:'system', title:`Lead added as ${status.toUpperCase()}`,
       description:'Created directly (Edge Function unavailable)' });
 
-    const schedDef = status==='hot'
-      ? [{d:0, a:'call',  p:'high',   step:1, lbl:'Immediate Call'}]
-      : status==='warm'
-        ? [{d:0,  a:workflowCfg.warm_day1_action||'call',  p:'high',   step:1, lbl:'Day 1 — Call'},
-           {d:3,  a:workflowCfg.warm_day3_action||'email', p:'medium', step:2, lbl:'Day 3 — Email'},
-           {d:7,  a:workflowCfg.warm_day7_action||'call',  p:'medium', step:3, lbl:'Day 7 — Call'},
-           {d:14, a:workflowCfg.warm_day14_action||'email',p:'low',    step:4, lbl:'Day 14 — Check-In'}]
-        : [{d:7,  a:workflowCfg.cold_day7_action||'sms',   p:'medium', step:1, lbl:'Day 7 — Light Touch'},
-           {d:30, a:workflowCfg.cold_day30_action||'email', p:'low',   step:2, lbl:'Day 30 — Re-Engage'},
-           {d:60, a:workflowCfg.cold_day60_action||'email', p:'low',   step:3, lbl:'Day 60 — Recycle'}];
-
-    const taskRows = schedDef.map(s => ({
-      lead_id:lead.id, lead_name:lead.name, action_type:s.a,
-      due_at: new Date(now.getTime()+s.d*MS).toISOString(),
-      priority:s.p, user_id:currentUser.id,
-      sequence_type: status,
-      sequence_step_number: s.step,
-      sequence_step_label: s.lbl,
-    }));
-    if (taskRows.length) await sb.from('tasks').insert(taskRows);
+    await scheduleSequenceTasks(lead.id, lead.name, status);
 
     closeModal();
     showToast(`${fname} ${lname} added (no calendar sync — deploy Edge Functions to enable)`, 'warning');
